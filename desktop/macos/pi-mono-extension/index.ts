@@ -1845,6 +1845,36 @@ export default async function omiProvider(pi: ExtensionAPI): Promise<void> {
     ],
   });
 
+  // OpenCode Go is client-direct: the user's OpenCode Go key powers the agent
+  // from this Mac through the OpenAI-compatible gateway, never through Omi's
+  // backend. Registered only when the Swift app forwarded the key.
+  const openCodeGoKey = process.env.OMI_BYOK_OPENCODEGO || "";
+  if (openCodeGoKey.length > 0) {
+    const openCodeGoModels = [
+      ["deepseek-v4-flash", "DeepSeek V4 Flash"],
+      ["deepseek-v4-pro", "DeepSeek V4 Pro"],
+      ["glm-5.2", "GLM 5.2"],
+      ["kimi-k3", "Kimi K3"],
+      ["grok-4.5", "Grok 4.5"],
+      ["minimax-m3", "MiniMax M3"],
+    ].map(([id, name]) => ({
+      id,
+      name,
+      reasoning: true,
+      input: ["text"] as string[],
+      contextWindow: 200_000,
+      maxTokens: 16_384,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    }));
+    pi.registerProvider("opencodego", {
+      api: "openai-completions",
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      apiKey: openCodeGoKey,
+      models: openCodeGoModels,
+    });
+    process.stderr.write("[omi-provider] OpenCode Go provider registered (client-direct)\n");
+  }
+
   // Pi asks for headers once per provider request and keeps them for retries,
   // which preserves one safe correlation id across an upstream retry chain.
   pi.on("before_provider_headers", async (event) => {

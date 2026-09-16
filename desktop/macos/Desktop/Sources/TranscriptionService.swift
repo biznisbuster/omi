@@ -461,7 +461,7 @@ class TranscriptionService: @unchecked Sendable {
     if let entry = APIKeyService.activeBYOKSnapshot[.deepgram] {
       request.setValue(entry.key, forHTTPHeaderField: BYOKProvider.deepgram.headerName)
     }
-    if let provider = APIKeyService.selectedBYOKLLMProvider,
+    if let provider = APIKeyService.selectedBYOKLLMProvider, !provider.isClientDirect,
       let entry = APIKeyService.activeBYOKSnapshot[provider]
     {
       request.setValue(entry.key, forHTTPHeaderField: provider.headerName)
@@ -785,7 +785,7 @@ extension TranscriptionService {
     if let entry = APIKeyService.activeBYOKSnapshot[.deepgram] {
       request.setValue(entry.key, forHTTPHeaderField: BYOKProvider.deepgram.headerName)
     }
-    if let provider = APIKeyService.selectedBYOKLLMProvider,
+    if let provider = APIKeyService.selectedBYOKLLMProvider, !provider.isClientDirect,
       let entry = APIKeyService.activeBYOKSnapshot[provider]
     {
       request.setValue(entry.key, forHTTPHeaderField: provider.headerName)

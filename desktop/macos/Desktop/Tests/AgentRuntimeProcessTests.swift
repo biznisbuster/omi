@@ -1319,6 +1319,27 @@ final class AgentRuntimeProcessTests: XCTestCase {
     XCTAssertTrue(result.suppressedProviders.isEmpty)
   }
 
+  func testOpenCodeGoModelFallsBackToCatalogDefaultForStaleValues() {
+    let key = "dev_opencodego_model"
+    let saved = UserDefaults.standard.string(forKey: key)
+    defer {
+      if let saved {
+        UserDefaults.standard.set(saved, forKey: key)
+      } else {
+        UserDefaults.standard.removeObject(forKey: key)
+      }
+    }
+
+    UserDefaults.standard.set("not-a-real-model", forKey: key)
+    XCTAssertEqual(AgentRuntimeProcess.openCodeGoModel(), OpenCodeGoCatalog.defaultModelID)
+
+    UserDefaults.standard.set("glm-5.2", forKey: key)
+    XCTAssertEqual(AgentRuntimeProcess.openCodeGoModel(), "glm-5.2")
+
+    UserDefaults.standard.removeObject(forKey: key)
+    XCTAssertEqual(AgentRuntimeProcess.openCodeGoModel(), OpenCodeGoCatalog.defaultModelID)
+  }
+
   func testRemoveInheritedByokEnvironmentScrubsPrefixCaseInsensitively() {
     var env = [
       "OMI_BYOK_OPENAI": "stale-openai",

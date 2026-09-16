@@ -48,6 +48,11 @@ enum BYOKValidator {
         url: URL(string: "https://api.deepgram.com/v1/projects")!,
         headers: ["Authorization": "Token \(trimmed)"]
       )
+    case .opencodego:
+      return await ping(
+        url: URL(string: "\(OpenCodeGoCatalog.baseURL)/models")!,
+        headers: ["Authorization": "Bearer \(trimmed)"]
+      )
     }
   }
 

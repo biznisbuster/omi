@@ -2619,6 +2619,19 @@ actor AgentRuntimeProcess {
       log("AgentRuntimeProcess: pi-mono BYOK active, forwarding \(byok.values.count) usable user keys")
     }
 
+    // Client-direct BYOK providers (OpenCode Go) run the agent against the
+    // vendor API from this Mac. The adapter selects the provider/model from
+    // these vars instead of the default Omi gateway route.
+    if APIKeyService.selectedBYOKLLMProvider == .opencodego,
+      byok.values[Self.byokEnvironmentKey(for: .opencodego)] != nil
+    {
+      env["OMI_LLM_PROVIDER"] = "opencodego"
+      env["OMI_LLM_MODEL"] = Self.openCodeGoModel()
+    } else {
+      env.removeValue(forKey: "OMI_LLM_PROVIDER")
+      env.removeValue(forKey: "OMI_LLM_MODEL")
+    }
+
     let shouldFetchManagedToken = AgentRuntimeCredentialPolicy.requiresManagedCredentials(
       requestedCredentials: requiresCredentials,
       isNonProduction: AppBuild.isNonProduction,
@@ -2818,6 +2831,13 @@ actor AgentRuntimeProcess {
 
   static func byokEnvironmentKey(for provider: BYOKProvider) -> String {
     "OMI_BYOK_\(provider.rawValue.uppercased())"
+  }
+
+  /// Selected OpenCode Go model id, validated against the published catalog so
+  /// a stale or hand-edited UserDefaults value cannot reach the provider.
+  nonisolated static func openCodeGoModel() -> String {
+    let stored = UserDefaults.standard.string(forKey: "dev_opencodego_model") ?? ""
+    return OpenCodeGoCatalog.models.contains { $0.id == stored } ? stored : OpenCodeGoCatalog.defaultModelID
   }
 
   static func removeInheritedBYOKEnvironment(from env: inout [String: String]) {

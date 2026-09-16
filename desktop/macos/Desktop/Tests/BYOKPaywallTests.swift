@@ -132,6 +132,41 @@ import XCTest
     XCTAssertNil(headers[BYOKProvider.gemini.headerName])
   }
 
+  func testClientDirectProviderEnrollsLocallyButNeverSendsHeadersToOmi() async throws {
+    let savedProvider = UserDefaults.standard.string(forKey: .byokLLMProvider)
+    defer {
+      if let savedProvider {
+        UserDefaults.standard.set(savedProvider, forKey: .byokLLMProvider)
+      } else {
+        UserDefaults.standard.removeObject(forKey: .byokLLMProvider)
+      }
+    }
+    UserDefaults.standard.set(BYOKLLMProvider.opencodego.rawValue, forKey: .byokLLMProvider)
+    UserDefaults.standard.set("sk-opencodego-test", forKey: BYOKProvider.opencodego.storageKey)
+    enroll(.opencodego)
+
+    XCTAssertTrue(APIKeyService.isByokActive, "a locally enrolled client-direct key activates BYOK")
+    XCTAssertEqual(
+      APIKeyService.activeBYOKSnapshot[.opencodego]?.key, "sk-opencodego-test",
+      "the agent runtime still needs the key from the active snapshot")
+
+    let client = APIClient()
+    await client.setTestAuthHeader("Bearer test-token")
+    let headers = try await client.buildHeaders()
+
+    XCTAssertNil(
+      headers[BYOKProvider.opencodego.headerName],
+      "client-direct keys must never travel to the Omi backend")
+  }
+
+  func testOpenCodeGoCatalogDefaultAndDisplayNames() {
+    let ids = OpenCodeGoCatalog.models.map(\.id)
+    XCTAssertTrue(ids.contains(OpenCodeGoCatalog.defaultModelID))
+    XCTAssertEqual(ids.count, Set(ids).count, "catalog model ids are unique")
+    XCTAssertEqual(OpenCodeGoCatalog.displayName(for: "deepseek-v4-flash"), "DeepSeek V4 Flash")
+    XCTAssertEqual(OpenCodeGoCatalog.displayName(for: "unknown-model"), "unknown-model")
+  }
+
   func testPaywallFlagSuppressedWhenByokActive() {
     // The exact bug: trial-expired flag set, then user configures BYOK keys.
     UserDefaults.standard.set(true, forKey: paywallKey)

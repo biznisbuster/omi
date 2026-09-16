@@ -112,10 +112,12 @@ struct OmiHTTPTransport {
 
     // BYOK: attach user-provided keys so the backend uses them for LLM/STT
     // calls this request triggers. Sent per-request; never stored server-side.
+    // Client-direct providers (OpenCode Go) never reach the Omi backend, so
+    // their key stays on this Mac.
     if includeBYOK, APIKeyService.isByokActive {
       let health = await MainActor.run { CredentialHealthManager.shared }
       let snapshot = APIKeyService.activeBYOKSnapshot
-      for (provider, entry) in snapshot {
+      for (provider, entry) in snapshot where !provider.isClientDirect {
         let canAttach = await MainActor.run {
           health.canUseBYOK(provider: provider, fingerprint: entry.fingerprint)
         }

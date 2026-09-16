@@ -216,6 +216,17 @@ function mapModel(model: string): string {
   return MODEL_MAP[model] ?? model;
 }
 
+/** Model IDs published by the OpenCode Go gateway (client-direct provider). */
+const OPENCODE_GO_MODEL_IDS = new Set([
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "glm-5.2",
+  "kimi-k3",
+  "grok-4.5",
+  "minimax-m3",
+]);
+const OPENCODE_GO_FALLBACK_MODEL = "deepseek-v4-flash";
+
 /** Resolve the pi binary bundled inside the Mac app.
  *
  *  Resolution order:
@@ -542,6 +553,11 @@ export class PiMonoAdapter implements HarnessAdapter {
     jitProactivity: boolean;
   } = { chatFirstUi: false, controlGeneration: null, jitKnowledgeToolsEnabled: false, jitProactivity: false };
   private readonly sessionPrefix: string;
+  /** Provider for this runtime: "omi" (default gateway) or a client-direct
+   *  BYOK provider such as "opencodego", selected by the host app. */
+  private readonly providerId = process.env.OMI_LLM_PROVIDER || "omi";
+  /** Model forced by the host for client-direct providers. */
+  private readonly hostModelId = process.env.OMI_LLM_MODEL || "";
   /** True when a token refresh was deferred because a prompt was active */
   private pendingTokenRefresh = false;
   /** True when a system-prompt change was deferred because a prompt was active */
@@ -557,6 +573,27 @@ export class PiMonoAdapter implements HarnessAdapter {
       resolveBundledExtension();
   }
 
+  /** Spawn-time model for the selected provider. */
+  private defaultModelId(): string {
+    if (this.providerId === "opencodego") {
+      return this.hostModelId || OPENCODE_GO_FALLBACK_MODEL;
+    }
+    return this.hostModelId || "omi-sonnet";
+  }
+
+  /** Resolve a requested model id for the selected provider. The Omi gateway
+   *  keeps its claude-* → omi-* mapping; client-direct providers accept only
+   *  their published catalog and otherwise fall back to the host's model. */
+  private resolveModel(requested?: string): string | undefined {
+    if (this.providerId === "omi") {
+      return requested ? mapModel(requested) : undefined;
+    }
+    if (requested && (this.providerId !== "opencodego" || OPENCODE_GO_MODEL_IDS.has(requested))) {
+      return requested;
+    }
+    return this.hostModelId || this.defaultModelId();
+  }
+
   async start(): Promise<void> {
     if (this.process) {
       return;
@@ -568,9 +605,9 @@ export class PiMonoAdapter implements HarnessAdapter {
       "-e",
       this.extensionPath,
       "--provider",
-      "omi",
+      this.providerId,
       "--model",
-      "omi-sonnet",
+      this.defaultModelId(),
     ];
     // Pi has no set_system_prompt RPC — system prompt must be baked at spawn
     // time via the --system-prompt CLI flag. To change it, restart the process.
@@ -741,7 +778,7 @@ export class PiMonoAdapter implements HarnessAdapter {
   }
 
   async createSession(opts: SessionOpts): Promise<string> {
-    const mapped = opts.model ? mapModel(opts.model) : undefined;
+    const mapped = this.resolveModel(opts.model);
     await this.setExecutionRole(opts.executionRole ?? "coordinator");
 
     const admittedWorkingDirectory = resolve(opts.cwd);
@@ -778,7 +815,7 @@ export class PiMonoAdapter implements HarnessAdapter {
     if (mapped) {
       this.sendCommand({
         type: "set_model",
-        provider: "omi",
+        provider: this.providerId,
         modelId: mapped,
       });
     }
@@ -1002,14 +1039,14 @@ export class PiMonoAdapter implements HarnessAdapter {
   }
 
   async setModel(sessionId: string, model: string): Promise<void> {
-    const mapped = mapModel(model);
+    const mapped = this.resolveModel(model) ?? this.defaultModelId();
     const session = this.sessions.get(sessionId);
     if (session) {
       session.model = mapped;
     }
     this.sendCommand({
       type: "set_model",
-      provider: "omi",
+      provider: this.providerId,
       modelId: mapped,
     });
   }

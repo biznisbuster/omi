@@ -21,6 +21,7 @@ enum BYOKProvider: String, CaseIterable {
   case anthropic
   case gemini
   case deepgram
+  case opencodego
 
   var storageKey: String {
     switch self {
@@ -29,6 +30,7 @@ enum BYOKProvider: String, CaseIterable {
     case .anthropic: return "dev_anthropic_api_key"
     case .gemini: return "dev_gemini_api_key"
     case .deepgram: return "dev_deepgram_api_key"
+    case .opencodego: return "dev_opencodego_api_key"
     }
   }
 
@@ -39,6 +41,7 @@ enum BYOKProvider: String, CaseIterable {
     case .anthropic: return "X-BYOK-Anthropic"
     case .gemini: return "X-BYOK-Gemini"
     case .deepgram: return "X-BYOK-Deepgram"
+    case .opencodego: return "X-BYOK-OpenCodeGo"
     }
   }
 
@@ -49,7 +52,35 @@ enum BYOKProvider: String, CaseIterable {
     case .anthropic: return "Anthropic"
     case .gemini: return "Gemini"
     case .deepgram: return "Deepgram"
+    case .opencodego: return "OpenCode Go"
     }
+  }
+
+  /// True for providers the app calls directly with the user's key instead of
+  /// proxying through the Omi backend. Client-direct providers are validated and
+  /// enrolled on this Mac only: they never enroll with the backend and their key
+  /// is never attached as an `X-BYOK-*` header on Omi requests.
+  var isClientDirect: Bool {
+    self == .opencodego
+  }
+}
+
+/// Models exposed by the OpenCode Go subscription gateway
+/// (`https://opencode.ai/zen/go/v1`, OpenAI-compatible chat completions).
+enum OpenCodeGoCatalog {
+  static let baseURL = "https://opencode.ai/zen/go/v1"
+  static let defaultModelID = "deepseek-v4-flash"
+  static let models: [(id: String, name: String)] = [
+    ("deepseek-v4-flash", "DeepSeek V4 Flash"),
+    ("deepseek-v4-pro", "DeepSeek V4 Pro"),
+    ("glm-5.2", "GLM 5.2"),
+    ("kimi-k3", "Kimi K3"),
+    ("grok-4.5", "Grok 4.5"),
+    ("minimax-m3", "MiniMax M3"),
+  ]
+
+  static func displayName(for modelID: String) -> String {
+    models.first(where: { $0.id == modelID })?.name ?? modelID
   }
 }
 
@@ -58,6 +89,7 @@ enum BYOKLLMProvider: String, CaseIterable, Identifiable {
   case openai
   case gemini
   case anthropic
+  case opencodego
 
   var id: String { rawValue }
 
@@ -67,6 +99,7 @@ enum BYOKLLMProvider: String, CaseIterable, Identifiable {
     case .openai: return "OpenAI Direct"
     case .gemini: return "Gemini"
     case .anthropic: return "Anthropic"
+    case .opencodego: return "OpenCode Go"
     }
   }
 
@@ -76,6 +109,7 @@ enum BYOKLLMProvider: String, CaseIterable, Identifiable {
     case .openai: return .openai
     case .gemini: return .gemini
     case .anthropic: return .anthropic
+    case .opencodego: return .opencodego
     }
   }
 }

@@ -76,6 +76,27 @@ extension SettingsContentView {
         value: selectedBYOKLLMKey
       )
 
+      if selectedBYOKLLMProvider == .opencodego {
+        settingsCard(settingId: "advanced.devkeys.opencodego-model") {
+          VStack(alignment: .leading, spacing: OmiSpacing.sm) {
+            Text("OpenCode Go model")
+              .scaledFont(size: OmiType.body, weight: .medium)
+              .foregroundColor(Ink.primary)
+            Text(
+              "Chat runs directly against your OpenCode Go subscription from this Mac. The key stays in this app and never goes to Omi's servers."
+            )
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(Ink.secondary)
+            Picker("Model", selection: $devOpenCodeGoModel) {
+              ForEach(OpenCodeGoCatalog.models, id: \.id) { model in
+                Text(model.name).tag(model.id)
+              }
+            }
+            .pickerStyle(.menu)
+          }
+        }
+      }
+
       developerKeyField(
         provider: .deepgram,
         title: "Deepgram API Key",
@@ -138,6 +159,7 @@ extension SettingsContentView {
     case .openai: return $devOpenAIKey
     case .gemini: return $devGeminiKey
     case .anthropic: return $devAnthropicKey
+    case .opencodego: return $devOpenCodeGoKey
     }
   }
 
@@ -147,6 +169,7 @@ extension SettingsContentView {
     case .openai: return "Uses your OpenAI API key directly."
     case .gemini: return "Uses Gemini 2.5 Flash Lite directly."
     case .anthropic: return "Uses your Anthropic API key directly."
+    case .opencodego: return "Client-direct: your OpenCode Go subscription powers chat without an Omi key or quota."
     }
   }
 
@@ -164,7 +187,7 @@ extension SettingsContentView {
 
   var hasAnyBYOKKey: Bool {
     !devOpenRouterKey.isEmpty || !devOpenAIKey.isEmpty || !devAnthropicKey.isEmpty || !devGeminiKey.isEmpty
-      || !devDeepgramKey.isEmpty
+      || !devDeepgramKey.isEmpty || !devOpenCodeGoKey.isEmpty
   }
 
   var hasAllBYOKKeys: Bool {
@@ -200,6 +223,7 @@ extension SettingsContentView {
     devAnthropicKey = ""
     devGeminiKey = ""
     devDeepgramKey = ""
+    devOpenCodeGoKey = ""
     byokKeyStatuses = [:]
     byokActivationError = nil
     // Clearing the fields is an explicit "take me off the free plan", so say so
@@ -274,8 +298,18 @@ extension SettingsContentView {
             acc[entry.key.rawValue] = entry.value.fingerprint
           }
         }
+        // Client-direct providers (OpenCode Go) keep their whole enrollment on
+        // this Mac: the backend never sees the key or its fingerprint. Only
+        // server-routed capabilities (Deepgram) go through activateBYOK.
+        let serverFingerprints = fingerprints.filter {
+          !(BYOKProvider(rawValue: $0.key)?.isClientDirect ?? false)
+        }
         do {
-          try await APIClient.shared.activateBYOK(fingerprints: fingerprints)
+          if serverFingerprints.isEmpty {
+            try? await APIClient.shared.deactivateBYOK()
+          } else {
+            try await APIClient.shared.activateBYOK(fingerprints: serverFingerprints)
+          }
           APIKeyService.persistEnrolledFingerprints(fingerprints)
           await FloatingBarUsageLimiter.shared.fetchPlan()
           await MainActor.run {
