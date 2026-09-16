@@ -1,0 +1,1 @@
+{"change": "An exhausted realtime provider quota now pauses that key for ten minutes instead of re-trying it every turn, so voice turns fall back immediately instead of waiting through a doomed session warm-up"}

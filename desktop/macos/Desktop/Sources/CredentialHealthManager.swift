@@ -130,16 +130,38 @@ final class CredentialHealthManager: ObservableObject {
 
   private var invalidBYOKFingerprints: [BYOKProvider: String] = [:]
 
-  private init() {}
+  /// Provider quota failures put the key on a cooldown instead of a ban: a quota
+  /// is a bounded state that resets, and retrying it every turn cost each turn
+  /// the provider's whole warm timeout before the cascade could run — the
+  /// "sometimes the realtime voice works, sometimes it degrades to the local
+  /// one" churn, paid turn by turn.
+  static let quotaCooldown: TimeInterval = 10 * 60
+  private var quotaBlockedBYOKFingerprints: [BYOKProvider: (fingerprint: String, blockedUntil: Date)] = [:]
+
+  /// Injectable so the cooldown is testable without wall-clock sleeps.
+  private let now: () -> Date
+
+  private init() {
+    self.now = Date.init
+  }
+
+  init(now: @escaping () -> Date) {
+    self.now = now
+  }
 
   func reset() {
     visibleRecovery = nil
     invalidBYOKFingerprints.removeAll()
+    quotaBlockedBYOKFingerprints.removeAll()
   }
 
   func canUseBYOK(provider: BYOKProvider, fingerprint: String?) -> Bool {
-    guard let fingerprint, let invalid = invalidBYOKFingerprints[provider] else { return true }
-    return invalid != fingerprint
+    guard let fingerprint else { return true }
+    if let invalid = invalidBYOKFingerprints[provider], invalid == fingerprint { return false }
+    if let blocked = quotaBlockedBYOKFingerprints[provider], blocked.fingerprint == fingerprint {
+      return now() >= blocked.blockedUntil
+    }
+    return true
   }
 
   func record(_ error: CredentialHealthError, context: String) {
@@ -158,8 +180,17 @@ final class CredentialHealthManager: ObservableObject {
     fingerprint: String?,
     context: String
   ) {
-    if case .providerAuthFailed(_, .byok) = failureClass, let fingerprint {
-      invalidBYOKFingerprints[provider.byokProvider] = fingerprint
+    if let fingerprint {
+      switch failureClass {
+      case .providerAuthFailed(_, .byok):
+        invalidBYOKFingerprints[provider.byokProvider] = fingerprint
+      case .providerQuotaExceeded:
+        quotaBlockedBYOKFingerprints[provider.byokProvider] = (
+          fingerprint, now().addingTimeInterval(Self.quotaCooldown)
+        )
+      default:
+        break
+      }
     }
     record(
       failureClass: failureClass,
