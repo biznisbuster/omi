@@ -102,6 +102,10 @@ covers:
   # branch is exercised by the same spawn path (a configured OpenCode Go key is
   # not required for the harness turn).
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess+ClientDirectProvider.swift
+  # The send-admission decision this flow's chat turn runs through: a
+  # client-direct BYOK environment is exempt from the managed quota, which is
+  # what lets a paid-on-your-own-provider send complete here.
+  - desktop/macos/Desktop/Sources/Chat/ChatQuotaAdmissionPolicy.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess+JITKnowledgeToolsGate.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeBridgeLifecycle.swift
