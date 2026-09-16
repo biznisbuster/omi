@@ -1409,6 +1409,8 @@ class ChatProvider: ObservableObject {
 
   private var multiChatObserver: AnyCancellable?
   private var playwrightExtensionObserver: AnyCancellable?
+  private var byokEnvironmentObserver: AnyCancellable?
+  private var lastByokRuntimeFingerprint = APIKeyService.byokRuntimeFingerprint
   private var sessionGroupingObserver: AnyCancellable?
   private var activationObserver: AnyCancellable?
   private var runtimeOwnerObserver: AnyCancellable?
@@ -1612,7 +1614,7 @@ class ChatProvider: ObservableObject {
       isRuntimeStarted: { [weak self] in self?.agentBridgeStarted ?? false },
       respawn: { [weak self] in
         guard let self else { throw BridgeError.stopped }
-        try await self.respawnBridgeForUserMcpChange()
+        try await self.respawnBridgeForRuntimeInputChange()
       })
 
     // A server was added, removed, or re-authed in ~/.omi/mcp.json. The runtime
@@ -1625,6 +1627,29 @@ class ChatProvider: ObservableObject {
           UserMcpRuntimeRefresh.shared.changeDetected()
         }
       }
+
+    // BYOK credentials reach the runtime as spawn-time environment variables:
+    // the pi-mono extension registers client-direct providers (OpenCode Go)
+    // and receives the selected key once per process. A key added, rotated, or
+    // enrolled in Settings while a runtime is already warm must respawn it —
+    // otherwise the next chat turn silently falls back to the managed route
+    // and can fail with a quota error for a key the user just configured.
+    // Fingerprint only the *effective* environment (provider + enrollment), so
+    // half-typed or rejected keys never churn the runtime.
+    byokEnvironmentObserver = NotificationCenter.default.publisher(
+      for: UserDefaults.didChangeNotification, object: UserDefaults.standard
+    )
+    .receive(on: DispatchQueue.main)
+    .sink { [weak self] _ in
+      Task { @MainActor in
+        guard let self else { return }
+        let fingerprint = APIKeyService.byokRuntimeFingerprint
+        guard fingerprint != self.lastByokRuntimeFingerprint else { return }
+        self.lastByokRuntimeFingerprint = fingerprint
+        log("ChatProvider: BYOK environment changed, requesting agent bridge respawn")
+        UserMcpRuntimeRefresh.shared.changeDetected()
+      }
+    }
 
     // Observe changes to Playwright extension mode setting — restart bridge to pick up new env vars
     playwrightExtensionObserver = UserDefaults.standard.publisher(for: \.playwrightUseExtension)
@@ -1764,14 +1789,16 @@ class ChatProvider: ObservableObject {
     }
   }
 
-  /// Respawns the shared runtime so a ~/.omi/mcp.json change reaches the
-  /// pi-mono extension, which registers its MCP proxy tools once per spawn.
-  /// Mirrors the Playwright-setting restart: mark the warm bridge stale,
-  /// restart the process, and rebuild readiness. A refused restart (requests
-  /// active elsewhere) leaves the old process alive and serving, so it keeps
+  /// Respawns the shared runtime so spawn-time inputs reach it: a
+  /// ~/.omi/mcp.json change (the extension registers MCP proxy tools once per
+  /// spawn) or a BYOK environment change (client-direct providers are
+  /// registered from `OMI_BYOK_*`/`OMI_LLM_*` env at spawn). Mirrors the
+  /// Playwright-setting restart: mark the warm bridge stale, restart the
+  /// process, and rebuild readiness. A refused restart (requests active
+  /// elsewhere) leaves the old process alive and serving, so it keeps
   /// counting as started and the caller's pending change retries later.
-  private func respawnBridgeForUserMcpChange() async throws {
-    log("ChatProvider: user MCP servers changed — restarting agent bridge")
+  private func respawnBridgeForRuntimeInputChange() async throws {
+    log("ChatProvider: runtime inputs changed (user MCP servers or BYOK environment) — restarting agent bridge")
     agentBridgeStarted = false
     do {
       try await resolvedAgentClient().restart()
@@ -1784,7 +1811,7 @@ class ChatProvider: ObservableObject {
     guard await ensureBridgeStarted() else {
       throw BridgeError.stopped
     }
-    log("ChatProvider: agent bridge restarted with current user MCP servers")
+    log("ChatProvider: agent bridge restarted with the current runtime inputs")
   }
 
   private func performBridgeReadinessStartup() async throws -> Bool {

@@ -1617,7 +1617,13 @@ actor AgentBridge {
     }
 
     let usesManagedCloud = session.profile.credentialScope == .managedCloud
-    if usesManagedCloud {
+    // Client-direct BYOK sessions never reach Omi's inference plane, so the
+    // managed question quota must not block them (see the policy's doc).
+    let quotaGovernsSend = ChatQuotaAdmissionPolicy.quotaGovernsSend(
+      credentialScope: session.profile.credentialScope,
+      isByokActive: APIKeyService.isByokActive,
+      selectedProvider: APIKeyService.selectedBYOKLLMProvider)
+    if quotaGovernsSend {
       // Refresh before the cached verdict is applied, not after it: a blocking
       // snapshot must never be the reason it is itself never re-fetched. When
       // the throw came first, upgrading an exhausted plan left this cache

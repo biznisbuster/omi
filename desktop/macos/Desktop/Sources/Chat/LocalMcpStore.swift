@@ -287,8 +287,9 @@ final class UserMcpRuntimeRefresh {
     self.respawn = respawn
   }
 
-  /// A `.omiUserMcpDidChange` notification arrived. Coalesces while a debounced
-  /// cycle is already in flight; the in-flight cycle picks the change up.
+  /// A runtime-input change arrived (`.omiUserMcpDidChange` or a BYOK
+  /// environment change). Coalesces while a debounced cycle is already in
+  /// flight; the in-flight cycle picks the change up.
   func changeDetected() {
     pendingChange = true
     guard !debounceInFlight else { return }

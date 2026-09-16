@@ -167,6 +167,50 @@ import XCTest
     XCTAssertEqual(OpenCodeGoCatalog.displayName(for: "unknown-model"), "unknown-model")
   }
 
+  func testByokRuntimeFingerprintTracksOnlyTheEffectiveEnvironment() {
+    let savedProvider = UserDefaults.standard.string(forKey: .byokLLMProvider)
+    let savedKey = UserDefaults.standard.string(forKey: BYOKProvider.openrouter.storageKey)
+    let savedFingerprints = APIKeyService.enrolledFingerprints()
+    defer {
+      if let savedProvider {
+        UserDefaults.standard.set(savedProvider, forKey: .byokLLMProvider)
+      } else {
+        UserDefaults.standard.removeObject(forKey: .byokLLMProvider)
+      }
+      if let savedKey {
+        UserDefaults.standard.set(savedKey, forKey: BYOKProvider.openrouter.storageKey)
+      } else {
+        UserDefaults.standard.removeObject(forKey: BYOKProvider.openrouter.storageKey)
+      }
+      APIKeyService.persistEnrolledFingerprints(savedFingerprints)
+    }
+
+    UserDefaults.standard.set(BYOKLLMProvider.openrouter.rawValue, forKey: .byokLLMProvider)
+    UserDefaults.standard.set("sk-or-x", forKey: BYOKProvider.openrouter.storageKey)
+    APIKeyService.persistEnrolledFingerprints([:])
+    let unenrolled = APIKeyService.byokRuntimeFingerprint
+    XCTAssertEqual(
+      APIKeyService.byokRuntimeFingerprint, unenrolled,
+      "an unchanged environment produces a stable fingerprint")
+
+    // A typed-but-not-yet-validated key must not churn a warm runtime.
+    UserDefaults.standard.set("sk-or-y", forKey: BYOKProvider.openrouter.storageKey)
+    XCTAssertEqual(
+      APIKeyService.byokRuntimeFingerprint, unenrolled,
+      "raw key edits do not change the effective environment until enrollment")
+
+    APIKeyService.persistEnrolledFingerprints([
+      BYOKProvider.openrouter.rawValue: APIKeyService.byokFingerprint("sk-or-y")
+    ])
+    let enrolled = APIKeyService.byokRuntimeFingerprint
+    XCTAssertNotEqual(enrolled, unenrolled, "enrollment changes the runtime environment")
+
+    UserDefaults.standard.set(BYOKLLMProvider.opencodego.rawValue, forKey: .byokLLMProvider)
+    XCTAssertNotEqual(
+      APIKeyService.byokRuntimeFingerprint, enrolled,
+      "switching the selected provider changes the runtime environment")
+  }
+
   func testPaywallFlagSuppressedWhenByokActive() {
     // The exact bug: trial-expired flag set, then user configures BYOK keys.
     UserDefaults.standard.set(true, forKey: paywallKey)

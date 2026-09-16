@@ -430,6 +430,17 @@ final class APIKeyService: ObservableObject {
     return digest.map { String(format: "%02x", $0) }.joined()
   }
 
+  /// Identity of the BYOK environment a freshly spawned agent runtime would
+  /// receive. The runtime bakes provider keys at spawn (the pi-mono extension
+  /// registers client-direct providers once per process), so a change here
+  /// means a warm runtime is serving a stale credential set.
+  nonisolated static var byokRuntimeFingerprint: String {
+    let provider = selectedBYOKLLMProvider?.rawValue ?? "none"
+    let enrolled = selectedBYOKLLMProvider.flatMap { enrolledFingerprints()[$0.rawValue] } ?? ""
+    let active = isByokActive ? "1" : "0"
+    return byokFingerprint([provider, enrolled, active].joined(separator: "\u{1}"))
+  }
+
   /// Map of provider → (key, fingerprint) for every provider the user has configured.
   nonisolated static var byokSnapshot: [BYOKProvider: (key: String, fingerprint: String)] {
     var out: [BYOKProvider: (String, String)] = [:]
