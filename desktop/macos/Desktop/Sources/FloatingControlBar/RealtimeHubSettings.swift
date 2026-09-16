@@ -65,13 +65,31 @@ final class RealtimeHubSettings {
 
   private init() {}
 
+  /// Model id the hub session requests.
+  ///
+  /// Managed sessions must request the model the backend minted their token for.
+  /// Client-direct BYOK sessions may follow the Voice Model picker instead, so a
+  /// newer Live model can be tried without a backend change. Only same-provider
+  /// selections override: a Gemini session never takes GPT Realtime's id.
+  nonisolated static func sessionModelID(
+    provider: RealtimeHubProvider,
+    isClientDirectBYOK: Bool,
+    voiceModel: RealtimeOmniProvider
+  ) -> String {
+    guard isClientDirectBYOK else { return provider.modelID }
+    switch (provider, voiceModel) {
+    case (.gemini, .gemini38Live): return RealtimeOmniProvider.gemini38Live.modelID
+    default: return provider.modelID
+    }
+  }
+
   /// The hub provider follows the user's "Voice Model" choice in Advanced settings —
   /// there is no separate hub picker. The two map 1:1 (same underlying models), and
   /// `.auto` is already resolved to a concrete provider by `effectiveProvider`.
   var provider: RealtimeHubProvider {
     switch RealtimeOmniSettings.shared.effectiveProvider {
     case .gptRealtime2: return .openai
-    case .geminiFlashLive, .auto: return .gemini
+    case .geminiFlashLive, .gemini38Live, .auto: return .gemini
     }
   }
 

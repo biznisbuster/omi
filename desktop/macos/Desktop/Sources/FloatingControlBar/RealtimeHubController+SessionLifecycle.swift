@@ -573,6 +573,10 @@ extension RealtimeHubController {
       provider: provider,
       auth: auth,
       instructions: instructions,
+      modelIDOverride: RealtimeHubSettings.sessionModelID(
+        provider: provider,
+        isClientDirectBYOK: auth.isClientDirect,
+        voiceModel: RealtimeOmniSettings.shared.selectedProvider),
       availableDirectedProviders: registeredDirectedProviderIDs,
       contextPlanID: topLevelContext.planID,
       stableCacheIdentity: topLevelContext.stableCacheIdentity,

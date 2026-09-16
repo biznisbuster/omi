@@ -47,6 +47,14 @@ enum HubAuth {
     case .ephemeral(let t): return t
     }
   }
+  /// True when the session authenticates with the user's own provider key and
+  /// never touches Omi's minted credentials.
+  var isClientDirect: Bool {
+    switch self {
+    case .byokKey: return true
+    case .ephemeral: return false
+    }
+  }
   var isEphemeral: Bool { if case .ephemeral = self { return true } else { return false } }
 }
 
@@ -201,14 +209,21 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
   /// attachment with Gemini's later per-modality usage without logging pixels or app text.
   private var activeScreenEvidence: RealtimeScreenEvidenceDescriptor?
 
+  /// Model this session requests. Client-direct BYOK sessions may override the
+  /// provider's default (see `RealtimeHubSettings.sessionModelID`); managed
+  /// sessions leave it nil and request exactly what the token was minted for.
+  private let modelIDOverride: String?
+  private var effectiveModelID: String { modelIDOverride ?? provider.modelID }
+
   /// Log prefix that names the provider + model on every line, so it's always
   /// clear which model produced which event.
-  private var tag: String { "RealtimeHub[\(provider == .openai ? "openai" : "gemini"):\(provider.modelID)]" }
+  private var tag: String { "RealtimeHub[\(provider == .openai ? "openai" : "gemini"):\(effectiveModelID)]" }
 
   init(
     provider: RealtimeHubProvider,
     auth: HubAuth,
     instructions: String,
+    modelIDOverride: String? = nil,
     availableDirectedProviders: [String] = [],
     contextPlanID: String = "",
     stableCacheIdentity: String = "",
@@ -222,6 +237,7 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
     self.provider = provider
     self.auth = auth
     self.instructions = instructions
+    self.modelIDOverride = modelIDOverride
     self.availableDirectedProviders = availableDirectedProviders
     self.contextPlanID = contextPlanID
     self.stableCacheIdentity = stableCacheIdentity
@@ -1110,7 +1126,7 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
     case .openai:
       // BYOK key and ephemeral token both ride the Bearer header (verified). GA: no
       // OpenAI-Beta header. Same endpoint either way.
-      guard let url = URL(string: "wss://api.openai.com/v1/realtime?model=\(provider.modelID)")
+      guard let url = URL(string: "wss://api.openai.com/v1/realtime?model=\(effectiveModelID)")
       else { return nil }
       var r = URLRequest(url: url)
       r.setValue("Bearer \(auth.value)", forHTTPHeaderField: "Authorization")
@@ -1198,7 +1214,7 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
       // an optional bubble; inputAudioTranscription gives the user's STT.
       send(json: [
         "setup": [
-          "model": "models/\(provider.modelID)",
+          "model": "models/\(effectiveModelID)",
           // Low temperature → tool-choice routing is consistent for identical inputs
           // (default ~1.0 made the same request flip between answering and escalating).
           // mediaResolution HIGH so a screenshot frame isn't downsampled to a generic blur.
@@ -1454,7 +1470,7 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
     resetTurnUsage()
     guard auth.isEphemeral, it + ia + ic + ot + oa > 0 else { return }
     let providerName = provider == .gemini ? "gemini" : "openai"
-    let model = provider.modelID
+    let model = effectiveModelID
     Task {
       await APIClient.shared.reportRealtimeUsage(
         provider: providerName, model: model,

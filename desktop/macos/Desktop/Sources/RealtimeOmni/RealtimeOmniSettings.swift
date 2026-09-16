@@ -15,12 +15,14 @@ import Foundation
 enum RealtimeOmniProvider: String, CaseIterable, Sendable {
   case auto
   case geminiFlashLive
+  case gemini38Live
   case gptRealtime2
 
   var displayName: String {
     switch self {
     case .auto: return "Auto"
     case .geminiFlashLive: return "Gemini 3.1 Flash Live"
+    case .gemini38Live: return "Gemini 3.8 Live"
     case .gptRealtime2: return "GPT Realtime 2"
     }
   }
@@ -29,6 +31,7 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
     switch self {
     case .auto: return "Daily-picks the best model by quality & speed"
     case .geminiFlashLive: return "Google · native audio + vision, lowest cost"
+    case .gemini38Live: return "Google · low-latency dialogue, background async function calling"
     case .gptRealtime2: return "OpenAI · GA speech-to-speech"
     }
   }
@@ -38,11 +41,14 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
     switch self {
     case .auto: return RealtimeOmniProvider.geminiFlashLive.modelID
     case .geminiFlashLive: return "gemini-3.1-flash-live-preview"
+    case .gemini38Live: return "gemini-3.8-live"
     case .gptRealtime2: return "gpt-realtime-2"
     }
   }
 
-  /// Concrete providers the resolver may choose from for `.auto`.
+  /// Concrete providers the resolver may choose from for `.auto`. Newer
+  /// user-pinnable models stay out of the automatic pick until the daily
+  /// quality/speed source scores them.
   static var selectable: [RealtimeOmniProvider] { [.geminiFlashLive, .gptRealtime2] }
 }
 
