@@ -3,7 +3,7 @@ import XCTest
 @testable import Omi_Computer
 
 final class LocalVoiceSynthesisServiceTests: XCTestCase {
-  private var root: URL!
+  private var root: URL = FileManager.default.temporaryDirectory
 
   override func setUp() {
     super.setUp()

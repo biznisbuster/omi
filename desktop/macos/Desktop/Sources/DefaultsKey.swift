@@ -140,6 +140,8 @@ enum DefaultsKey: String {
   case desktopIsPaywalled = "desktop_isPaywalled"
   case askOmiBarEnabled = "askOmiBarEnabled"
   case byokLLMProvider = "dev_byok_llm_provider"
+  /// Client-direct OpenCode Go model id (validated against `OpenCodeGoCatalog`).
+  case openCodeGoModel = "dev_opencodego_model"
   /// Provider → SHA-256 fingerprint last enrolled after BYOKValidator .ok.
   case byokEnrolledFingerprints = "byok_enrolled_fingerprints"
   /// UID that last owned persisted BYOK keys on this Mac.

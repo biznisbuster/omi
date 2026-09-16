@@ -48,17 +48,19 @@ final class LocalVoiceSynthesisService: Sendable {
 
   private struct Artifact {
     let name: String
-    let url: URL
+    let urlString: String
+    let fileName: String
     let sha256: String
     let byteCount: Int64
+
+    var url: URL? { URL(string: urlString) }
   }
 
   private static let wheel = Artifact(
     name: "piper runtime",
-    url: URL(
-      string:
-        "https://github.com/OHF-Voice/piper1-gpl/releases/download/v1.8.0/piper_tts-1.8.0-cp39-abi3-macosx_11_0_arm64.whl"
-    )!,
+    urlString:
+      "https://github.com/OHF-Voice/piper1-gpl/releases/download/v1.8.0/piper_tts-1.8.0-cp39-abi3-macosx_11_0_arm64.whl",
+    fileName: "piper_tts-1.8.0-cp39-abi3-macosx_11_0_arm64.whl",
     sha256: "33e7425933e9290fe651ae127916ed1ca6104cfa3d94e9049295dd3a5c449382",
     byteCount: 34_119_781
   )
@@ -66,19 +68,17 @@ final class LocalVoiceSynthesisService: Sendable {
   private static let voiceArtifacts: [Artifact] = [
     Artifact(
       name: "Serbian voice",
-      url: URL(
-        string:
-          "https://huggingface.co/rhasspy/piper-voices/resolve/main/sr/sr_RS/serbski_institut/medium/\(modelID).onnx"
-      )!,
+      urlString:
+        "https://huggingface.co/rhasspy/piper-voices/resolve/main/sr/sr_RS/serbski_institut/medium/\(modelID).onnx",
+      fileName: "\(modelID).onnx",
       sha256: "d7003890cf596e653f660a4fd97fd17f57f1eceb6d9727abad9cd76d2fda0d80",
       byteCount: 76_733_615
     ),
     Artifact(
       name: "Serbian voice config",
-      url: URL(
-        string:
-          "https://huggingface.co/rhasspy/piper-voices/resolve/main/sr/sr_RS/serbski_institut/medium/\(modelID).onnx.json"
-      )!,
+      urlString:
+        "https://huggingface.co/rhasspy/piper-voices/resolve/main/sr/sr_RS/serbski_institut/medium/\(modelID).onnx.json",
+      fileName: "\(modelID).onnx.json",
       sha256: "39ad6531b46ac629c0bed10aa9205dd2431e2dab3808b8535808711db87c2bc0",
       byteCount: 4_999
     ),
@@ -140,12 +140,12 @@ final class LocalVoiceSynthesisService: Sendable {
     try fileManager.createDirectory(at: voicesDirectory, withIntermediateDirectories: true)
 
     progress?("Downloading local voice runtime…")
-    let wheelFile = installDirectory.appendingPathComponent(Self.wheel.url.lastPathComponent)
+    let wheelFile = installDirectory.appendingPathComponent(Self.wheel.fileName)
     try await ensureArtifact(Self.wheel, destination: wheelFile)
 
     progress?("Downloading Serbian voice…")
     for artifact in Self.voiceArtifacts {
-      let destination = voicesDirectory.appendingPathComponent(artifact.url.lastPathComponent)
+      let destination = voicesDirectory.appendingPathComponent(artifact.fileName)
       try await ensureArtifact(artifact, destination: destination)
     }
 
@@ -163,7 +163,10 @@ final class LocalVoiceSynthesisService: Sendable {
   private func ensureArtifact(_ artifact: Artifact, destination: URL) async throws {
     let fileManager = FileManager.default
     if fileMatches(artifact, at: destination) { return }
-    let (temporary, response) = try await URLSession.shared.download(from: artifact.url)
+    guard let url = artifact.url else {
+      throw InstallError.downloadFailed(artifact.name)
+    }
+    let (temporary, response) = try await URLSession.shared.download(from: url)
     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
       throw InstallError.downloadFailed(artifact.name)
     }

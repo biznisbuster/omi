@@ -49,10 +49,10 @@ enum BYOKValidator {
         headers: ["Authorization": "Token \(trimmed)"]
       )
     case .opencodego:
-      return await ping(
-        url: URL(string: "\(OpenCodeGoCatalog.baseURL)/models")!,
-        headers: ["Authorization": "Bearer \(trimmed)"]
-      )
+      guard let modelsURL = URL(string: OpenCodeGoCatalog.modelsURL) else {
+        return .failed("Invalid provider URL")
+      }
+      return await ping(url: modelsURL, headers: ["Authorization": "Bearer \(trimmed)"])
     }
   }
 

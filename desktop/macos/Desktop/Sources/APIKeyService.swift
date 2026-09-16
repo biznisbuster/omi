@@ -69,6 +69,7 @@ enum BYOKProvider: String, CaseIterable {
 /// (`https://opencode.ai/zen/go/v1`, OpenAI-compatible chat completions).
 enum OpenCodeGoCatalog {
   static let baseURL = "https://opencode.ai/zen/go/v1"
+  static let modelsURL = "https://opencode.ai/zen/go/v1/models"
   static let defaultModelID = "deepseek-v4-flash"
   static let models: [(id: String, name: String)] = [
     ("deepseek-v4-flash", "DeepSeek V4 Flash"),

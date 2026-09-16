@@ -2836,7 +2836,7 @@ actor AgentRuntimeProcess {
   /// Selected OpenCode Go model id, validated against the published catalog so
   /// a stale or hand-edited UserDefaults value cannot reach the provider.
   nonisolated static func openCodeGoModel() -> String {
-    let stored = UserDefaults.standard.string(forKey: "dev_opencodego_model") ?? ""
+    let stored = UserDefaults.standard.string(forKey: DefaultsKey.openCodeGoModel.rawValue) ?? ""
     return OpenCodeGoCatalog.models.contains { $0.id == stored } ? stored : OpenCodeGoCatalog.defaultModelID
   }
 
