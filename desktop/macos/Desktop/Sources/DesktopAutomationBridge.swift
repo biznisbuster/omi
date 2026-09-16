@@ -2566,17 +2566,41 @@ final class DesktopAutomationActionRegistry {
     }
 
     register(
+      name: "open_chat_lab",
+      summary: "Open the Chat Prompt Lab window (Settings → AI & Automation → Developer Tools)",
+      category: "dev_tools",
+      surfaces: ["settings"],
+      safety: "local_ui_state",
+      sideEffects: ["opens the Chat Lab utility window"]
+    ) { _ in
+      await MainActor.run { () -> [String: String] in
+        guard let provider = ChatProvider.mainInstance else {
+          return ["opened": "false", "reason": "no_chat_provider"]
+        }
+        ChatLabWindowManager.shared.openWindow(chatProvider: provider)
+        return ["opened": "true"]
+      }
+    }
+
+    register(
       name: "capture_main_window_png",
       summary: "Write PNG of the frontmost Omi window (in-process capture)",
-      params: ["path", "surface"]
+      params: ["path", "surface", "title"]
     ) { params in
       guard let path = params["path"], !path.isEmpty else {
         return ["error": "missing 'path'"]
       }
       return await MainActor.run { () -> [String: String] in
+        // `title` targets a named utility window (e.g. the Chat Lab); default
+        // remains the shell, matched case-insensitively on "omi".
+        let titleFilter = params["title"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard
-          let window = NSApp.windows.first(where: {
-            $0.isVisible && $0.title.range(of: "omi", options: .caseInsensitive) != nil
+          let window = NSApp.windows.first(where: { candidate in
+            guard candidate.isVisible else { return false }
+            if titleFilter.isEmpty {
+              return candidate.title.range(of: "omi", options: .caseInsensitive) != nil
+            }
+            return candidate.title.localizedCaseInsensitiveContains(titleFilter)
           })
         else {
           return ["error": "no_visible_window"]

@@ -557,30 +557,58 @@ class ChatLabViewModel: ObservableObject {
 
 struct ChatLabView: View {
   let chatProvider: ChatProvider
+  let onClose: (() -> Void)?
+
   @StateObject private var vm: ChatLabViewModel
 
   @State private var showSaveDialog = false
   @State private var newVersionName = ""
 
-  init(chatProvider: ChatProvider) {
+  init(chatProvider: ChatProvider, onClose: (() -> Void)? = nil) {
     self.chatProvider = chatProvider
+    self.onClose = onClose
     _vm = StateObject(wrappedValue: ChatLabViewModel(chatProvider: chatProvider))
   }
 
   var body: some View {
-    ScrollView {
-      VStack(spacing: OmiSpacing.xxl) {
-        promptHistorySection
-        promptEditorSection
-        evaluationSection
-        versionComparisonSection
+    VStack(spacing: 0) {
+      // The window hides its title bar (and, with it, any obvious way out): the
+      // traffic lights sit over the glass, and a full-size content view made
+      // them unreachable. Keep one visible, keyboard-reachable exit in the
+      // page itself — Escape works too.
+      HStack(spacing: OmiSpacing.md) {
+        Text("Chat Prompt Lab")
+          .scaledFont(size: OmiType.subheading, weight: .semibold)
+          .foregroundColor(Ink.primary)
+        Spacer()
+        if let onClose {
+          Button("Close", action: onClose)
+            .buttonStyle(OmiButtonStyle(.secondary, size: .compact))
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("chatlab.close")
+        }
       }
-      .padding(OmiSpacing.xxl)
+      .padding(.horizontal, OmiSpacing.xxl)
+      .padding(.vertical, OmiSpacing.md)
+
+      GlassSeparator()
+
+      ScrollView {
+        VStack(spacing: OmiSpacing.xxl) {
+          promptHistorySection
+          promptEditorSection
+          evaluationSection
+          versionComparisonSection
+        }
+        .padding(OmiSpacing.xxl)
+      }
     }
     .frame(minWidth: 900, minHeight: 600)
-    // No ground of its own: the glass window owns it. `glassContent()` also pins the panel's light
-    // appearance, without which `Ink`'s ladder resolves up on a Dark Mac and the page goes blank.
+    // The panel grounds the page (the window itself is transparent); `glassContent()` also pins
+    // the panel's light appearance, without which `Ink`'s ladder resolves up on a Dark Mac.
     .glassContent()
+    .onExitCommand { onClose?() }
   }
 
   // MARK: - Production Prompt History
@@ -1127,7 +1155,7 @@ struct ChatLabView: View {
 // MARK: - Window Manager
 
 @MainActor
-class ChatLabWindowManager {
+class ChatLabWindowManager: NSObject {
   static let shared = ChatLabWindowManager()
 
   private var window: NSWindow?
@@ -1143,8 +1171,15 @@ class ChatLabWindowManager {
       return
     }
 
-    let chatLabView = ChatLabView(chatProvider: provider)
-    let hostingView = NSHostingView(rootView: chatLabView)
+    let chatLabView = ChatLabView(
+      chatProvider: provider,
+      onClose: { [weak self] in self?.close() })
+    // The shell's design has no window ground — every surface wears the glass
+    // itself — so this utility window's content must too (same full-bleed panel
+    // the prompt/runner editors use). Without it the window is genuinely
+    // transparent: the Settings window behind shows through the editor.
+    let hostingView = NSHostingView(
+      rootView: chatLabView.inkGlassPanel(cornerRadius: 0, shadow: nil))
 
     let w = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 1100, height: 750),
@@ -1161,6 +1196,24 @@ class ChatLabWindowManager {
     w.isReleasedWhenClosed = false
     w.makeKeyAndOrderFront(nil)
 
+    w.delegate = self
     window = w
+  }
+
+  /// Closes the Lab window. `NSWindow.close()` is the same path the traffic
+  /// lights and ⌘W take; exposed so the page's own Close button and Escape can
+  /// reach it too — a hidden title bar left the window with no obvious exit.
+  func close() {
+    window?.close()
+    window = nil
+  }
+}
+
+// MARK: - NSWindowDelegate
+
+extension ChatLabWindowManager: NSWindowDelegate {
+  func windowWillClose(_ notification: Notification) {
+    guard (notification.object as? NSWindow) === window else { return }
+    window = nil
   }
 }
