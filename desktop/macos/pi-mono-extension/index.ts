@@ -28,6 +28,7 @@ import {
   type ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
+import { randomUUID } from "node:crypto";
 import { appendFile, chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { createConnection, type Socket } from "node:net";
@@ -1081,6 +1082,14 @@ export const OMI_TOOL_TIMEOUT_MS = 30_000;
 export const OMI_LONG_CONTROL_TOOL_TIMEOUT_MS = 10 * 60_000;
 export const OMI_CHAT_CONTRACT_VERSION = "1";
 
+/** Stable per-process id the OpenCode Go gateway asks for on every request so
+ *  it can route and reuse prompt caches across a conversation. */
+let openCodeGoSession: string | undefined;
+function openCodeGoSessionId(): string {
+  openCodeGoSession ??= randomUUID();
+  return openCodeGoSession;
+}
+
 export function applyOmiProviderHeaders(
   headers: Record<string, string>,
   relayContextRaw: string | undefined,
@@ -1847,19 +1856,22 @@ export default async function omiProvider(pi: ExtensionAPI): Promise<void> {
 
   // OpenCode Go is client-direct: the user's OpenCode Go key powers the agent
   // from this Mac through the OpenAI-compatible gateway, never through Omi's
-  // backend. Registered only when the Swift app forwarded the key.
+  // backend. Registered only when the Swift app forwarded the key. The model
+  // catalogue arrives in OMI_OPENCODEGO_MODELS (the app's single source of
+  // truth); the gateway asks clients to identify themselves with a real user
+  // agent and a stable x-opencode-session per conversation for routing and
+  // prompt-cache affinity.
   const openCodeGoKey = process.env.OMI_BYOK_OPENCODEGO || "";
   if (openCodeGoKey.length > 0) {
-    const openCodeGoModels = [
-      ["deepseek-v4-flash", "DeepSeek V4 Flash"],
-      ["deepseek-v4-pro", "DeepSeek V4 Pro"],
-      ["glm-5.2", "GLM 5.2"],
-      ["kimi-k3", "Kimi K3"],
-      ["grok-4.5", "Grok 4.5"],
-      ["minimax-m3", "MiniMax M3"],
-    ].map(([id, name]) => ({
+    const declared = (process.env.OMI_OPENCODEGO_MODELS || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+    const fallbackModel = process.env.OMI_LLM_MODEL || "deepseek-v4-flash";
+    const modelIds = declared.length > 0 ? declared : [fallbackModel];
+    const openCodeGoModels = modelIds.map((id) => ({
       id,
-      name,
+      name: id,
       reasoning: true,
       input: ["text"] as string[],
       contextWindow: 200_000,
@@ -1870,9 +1882,15 @@ export default async function omiProvider(pi: ExtensionAPI): Promise<void> {
       api: "openai-completions",
       baseUrl: "https://opencode.ai/zen/go/v1",
       apiKey: openCodeGoKey,
+      headers: {
+        "User-Agent": "omi-desktop/1.0",
+        "x-opencode-session": openCodeGoSessionId(),
+      },
       models: openCodeGoModels,
     });
-    process.stderr.write("[omi-provider] OpenCode Go provider registered (client-direct)\n");
+    process.stderr.write(
+      `[omi-provider] OpenCode Go provider registered (client-direct, ${modelIds.length} models)\n`,
+    );
   }
 
   // Pi asks for headers once per provider request and keeps them for retries,

@@ -67,17 +67,41 @@ enum BYOKProvider: String, CaseIterable {
 
 /// Models exposed by the OpenCode Go subscription gateway
 /// (`https://opencode.ai/zen/go/v1`, OpenAI-compatible chat completions).
+///
+/// Verified against the live Go plan on 2026-09-16 by probing every id the
+/// gateway's `/models` endpoint lists through `/chat/completions` with the
+/// user's key: the 24 entries below answered 200. The catalogue is the single
+/// source of truth — the agent runtime receives it as `OMI_OPENCODEGO_MODELS`
+/// so the picker and the provider registration cannot drift.
 enum OpenCodeGoCatalog {
   static let baseURL = "https://opencode.ai/zen/go/v1"
-  static let modelsURL = "https://opencode.ai/zen/go/v1/models"
+  static let modelsURL = "\(baseURL)/models"
   static let defaultModelID = "deepseek-v4-flash"
   static let models: [(id: String, name: String)] = [
     ("deepseek-v4-flash", "DeepSeek V4 Flash"),
     ("deepseek-v4-pro", "DeepSeek V4 Pro"),
+    ("deepseek-v4.1-flash", "DeepSeek V4.1 Flash"),
+    ("deepseek-flash", "DeepSeek Flash"),
+    ("deepseek-v4-flash-vision-exp", "DeepSeek V4 Flash Vision (exp)"),
     ("glm-5.2", "GLM 5.2"),
+    ("glm-5.3", "GLM 5.3"),
+    ("glm-5.3-flash", "GLM 5.3 Flash"),
     ("kimi-k3", "Kimi K3"),
-    ("grok-4.5", "Grok 4.5"),
+    ("kimi-k2.7-code", "Kimi K2.7 Code"),
+    ("kimi-k2.6", "Kimi K2.6"),
     ("minimax-m3", "MiniMax M3"),
+    ("minimax-m2.5", "MiniMax M2.5"),
+    ("qwen3.8-max", "Qwen3.8 Max"),
+    ("qwen3.8-flash", "Qwen3.8 Flash"),
+    ("qwen3.7-max", "Qwen3.7 Max"),
+    ("qwen3.7-plus", "Qwen3.7 Plus"),
+    ("qwen3.6-plus", "Qwen3.6 Plus"),
+    ("mimo-v2.5", "MiMo V2.5"),
+    ("mimo-v2.5-pro", "MiMo V2.5 Pro"),
+    ("hy3", "Hy3"),
+    ("hy4-preview", "Hy4 Preview"),
+    ("longcat-2.0", "LongCat 2.0"),
+    ("omen-alpha", "Omen Alpha"),
   ]
 
   static func displayName(for modelID: String) -> String {

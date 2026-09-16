@@ -216,16 +216,11 @@ function mapModel(model: string): string {
   return MODEL_MAP[model] ?? model;
 }
 
-/** Model IDs published by the OpenCode Go gateway (client-direct provider). */
-const OPENCODE_GO_MODEL_IDS = new Set([
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "glm-5.2",
-  "kimi-k3",
-  "grok-4.5",
-  "minimax-m3",
-]);
+/** Fallback model when the host did not pin one for a client-direct provider. */
 const OPENCODE_GO_FALLBACK_MODEL = "deepseek-v4-flash";
+/** Model ids that belong to Omi's own gateway and must never be forwarded to a
+ *  client-direct provider. */
+const OMI_PROVIDER_MODEL_PREFIXES = ["omi-", "claude-"];
 
 /** Resolve the pi binary bundled inside the Mac app.
  *
@@ -582,13 +577,14 @@ export class PiMonoAdapter implements HarnessAdapter {
   }
 
   /** Resolve a requested model id for the selected provider. The Omi gateway
-   *  keeps its claude-* → omi-* mapping; client-direct providers accept only
-   *  their published catalog and otherwise fall back to the host's model. */
+   *  keeps its claude-* → omi-* mapping; client-direct providers pass ids
+   *  through unless they are one of Omi's own, in which case the host-pinned
+   *  model governs. The provider's catalogue is the validity authority. */
   private resolveModel(requested?: string): string | undefined {
     if (this.providerId === "omi") {
       return requested ? mapModel(requested) : undefined;
     }
-    if (requested && (this.providerId !== "opencodego" || OPENCODE_GO_MODEL_IDS.has(requested))) {
+    if (requested && !OMI_PROVIDER_MODEL_PREFIXES.some((prefix) => requested.startsWith(prefix))) {
       return requested;
     }
     return this.hostModelId || this.defaultModelId();

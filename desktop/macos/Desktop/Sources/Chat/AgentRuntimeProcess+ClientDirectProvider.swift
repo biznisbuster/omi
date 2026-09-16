@@ -16,9 +16,13 @@ extension AgentRuntimeProcess {
     {
       env["OMI_LLM_PROVIDER"] = "opencodego"
       env["OMI_LLM_MODEL"] = openCodeGoModel()
+      // The catalogue travels with the spawn so the provider registration and
+      // the Settings picker cannot drift apart.
+      env["OMI_OPENCODEGO_MODELS"] = OpenCodeGoCatalog.models.map(\.id).joined(separator: ",")
     } else {
       env.removeValue(forKey: "OMI_LLM_PROVIDER")
       env.removeValue(forKey: "OMI_LLM_MODEL")
+      env.removeValue(forKey: "OMI_OPENCODEGO_MODELS")
     }
   }
 
