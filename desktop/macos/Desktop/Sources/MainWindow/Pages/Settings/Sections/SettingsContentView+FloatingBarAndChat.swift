@@ -139,22 +139,92 @@ extension SettingsContentView {
 
   func voicePicker(settingId: String) -> some View {
     settingsCard(settingId: settingId) {
-      HStack(spacing: OmiSpacing.lg) {
-        VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
-          Text("Voice")
-            .scaledFont(size: OmiType.subheading, weight: .semibold)
-            .foregroundColor(Ink.primary)
-          Text(
-            ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).description
-          )
-          .scaledFont(size: OmiType.body)
-          .foregroundColor(Ink.secondary)
-        }
-        Spacer()
-        SettingsMenuPicker(selection: $shortcutSettings.selectedVoiceID) {
-          ForEach(ShortcutSettings.availableVoices) { voice in
-            Text(voice.name).tag(voice.id)
+      VStack(alignment: .leading, spacing: OmiSpacing.md) {
+        HStack(spacing: OmiSpacing.lg) {
+          VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
+            Text("Voice")
+              .scaledFont(size: OmiType.subheading, weight: .semibold)
+              .foregroundColor(Ink.primary)
+            Text(
+              ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).description
+            )
+            .scaledFont(size: OmiType.body)
+            .foregroundColor(Ink.secondary)
           }
+          Spacer()
+          SettingsMenuPicker(selection: $shortcutSettings.selectedVoiceID) {
+            ForEach(ShortcutSettings.availableVoices) { voice in
+              Text(voice.name).tag(voice.id)
+            }
+          }
+        }
+
+        if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isLocalPiper {
+          localVoiceInstallRow
+        }
+      }
+    }
+  }
+
+  /// Installation state for the on-device Piper voice. The download is ~110 MB
+  /// and happens once per Mac; until it finishes, replies fall back to the
+  /// system voice rather than failing.
+  @ViewBuilder
+  var localVoiceInstallRow: some View {
+    HStack(spacing: OmiSpacing.sm) {
+      if LocalVoiceSynthesisService.shared.isInstalled {
+        Image(systemName: "checkmark.seal.fill")
+          .foregroundColor(Ink.listeningGreen)
+        Text(
+          "On-device voice installed. Replies are synthesized on this Mac — nothing is sent to a cloud voice service."
+        )
+        .scaledFont(size: OmiType.caption)
+        .foregroundColor(Ink.secondary)
+      } else if isInstallingLocalVoice {
+        ProgressView().controlSize(.mini)
+        Text(localVoiceInstallMessage ?? "Installing local voice…")
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+      } else {
+        Button("Install local voice (~110 MB)") {
+          startLocalVoiceInstall()
+        }
+        .buttonStyle(.plain)
+        .scaledFont(size: OmiType.caption, weight: .semibold)
+        .foregroundColor(Ink.primary)
+        if let localVoiceInstallError {
+          Text(localVoiceInstallError)
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(SettingsInk.notice)
+        }
+      }
+      Spacer()
+    }
+  }
+
+  func startLocalVoiceInstall() {
+    guard !isInstallingLocalVoice else { return }
+    isInstallingLocalVoice = true
+    localVoiceInstallError = nil
+    localVoiceInstallMessage = "Preparing download…"
+    Task {
+      do {
+        try await LocalVoiceSynthesisService.shared.ensureInstalled { message in
+          Task { @MainActor in
+            localVoiceInstallMessage = message
+          }
+        }
+        await MainActor.run {
+          isInstallingLocalVoice = false
+          localVoiceInstallMessage = nil
+          FloatingBarVoicePlaybackService.shared.playVoiceSample(
+            voiceID: shortcutSettings.selectedVoiceID)
+        }
+      } catch {
+        await MainActor.run {
+          isInstallingLocalVoice = false
+          localVoiceInstallMessage = nil
+          localVoiceInstallError = error.localizedDescription
         }
       }
     }

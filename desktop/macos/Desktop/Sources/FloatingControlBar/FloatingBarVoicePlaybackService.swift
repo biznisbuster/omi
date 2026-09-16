@@ -44,6 +44,28 @@ enum RealtimeSlowToolAcknowledgementKind: String, CaseIterable, Sendable {
       ]
     }
   }
+
+  /// Acknowledgements for the on-device Serbian voice. The English phrasing
+  /// would be phonemized with Serbian rules, so the local voice gets its own
+  /// lines.
+  var localPhrases: [String] {
+    switch self {
+    case .deeperThinking:
+      return [
+        "Da razmislim malo.",
+        "Daj mi trenutak da razmislim.",
+        "Pogledaću detaljnije.",
+        "Da se zamislim.",
+      ]
+    case .publicWebSearch:
+      return [
+        "Da provjerim.",
+        "Tražim najnovije.",
+        "Provjeravam to.",
+        "Da vidim šta ima novo.",
+      ]
+    }
+  }
 }
 
 @MainActor
@@ -86,6 +108,24 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     "Hold on.",
     "One sec.",
     "Working on it.",
+  ]
+
+  /// Filler lines for the on-device Serbian voice.
+  nonisolated private static let localFillerPhrases: [String] = [
+    "Da provjerim.",
+    "Samo trenutak.",
+    "Gledam.",
+    "Sekund.",
+    "Radim na tome.",
+  ]
+
+  /// Kickoff lines for the on-device Serbian voice.
+  nonisolated static let localBackgroundAgentKickoffPhrases: [String] = [
+    "Pokrećem agenta za to.",
+    "Bavim se tim.",
+    "Dajem to agentu.",
+    "Agent počinje sa tim.",
+    "Radim na tome.",
   ]
 
   private var playbackTask: Task<Void, Never>?
@@ -149,9 +189,14 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       currentMode = resolvePlaybackMode()
     }
     hasStartedRealPlayback = false
-    let phrase = Self.fillerPhrases.randomElement()!
 
     guard let mode = currentMode else { return }
+    let phrase: String
+    if case .localPiper = mode {
+      phrase = Self.localFillerPhrases.randomElement() ?? "Samo trenutak."
+    } else {
+      phrase = Self.fillerPhrases.randomElement() ?? "One moment."
+    }
     switch mode {
     case .systemVoice:
       enqueueSystemSpeech(phrase)
@@ -162,6 +207,35 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
         do {
           let audioData = try await Self.synthesizeOpenAISpeech(
             text: phrase, voiceID: voiceID, instructions: instructions)
+          try Task.checkCancellation()
+          await MainActor.run {
+            guard let self else { return }
+            guard self.playbackGeneration == generation else { return }
+            self.isFillerSynthesizing = false
+            self.fillerTask = nil
+            guard !self.hasStartedRealPlayback else {
+              self.clearFloatingPillResponseGlowIfIdle()
+              return
+            }
+            self.startPlayback(audioData, fallbackText: phrase)
+            self.clearFloatingPillResponseGlowIfIdle()
+          }
+        } catch {
+          await MainActor.run {
+            guard let self else { return }
+            guard self.playbackGeneration == generation else { return }
+            self.isFillerSynthesizing = false
+            self.fillerTask = nil
+            self.clearFloatingPillResponseGlowIfIdle()
+          }
+        }
+      }
+    case .localPiper:
+      isFillerSynthesizing = true
+      let generation = playbackGeneration
+      fillerTask = Task { [weak self] in
+        do {
+          let audioData = try await LocalVoiceSynthesisService.shared.synthesize(text: phrase)
           try Task.checkCancellation()
           await MainActor.run {
             guard let self else { return }
@@ -265,6 +339,10 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       )
     }
 
+    if selectedVoice.isLocalPiper {
+      return .localPiper
+    }
+
     return .systemVoice(selectedVoice)
   }
 
@@ -286,7 +364,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     switch mode {
     case .systemVoice:
       enqueueSystemSpeech(text)
-    case .openAI:
+    case .openAI, .localPiper:
       synthesisQueue.append(text)
       startSynthesisIfNeeded(mode: mode)
     }
@@ -304,9 +382,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       do {
         let audioData: Data
         switch mode {
-        case .openAI(let voiceID, let instructions):
-          audioData = try await Self.synthesizeOpenAISpeech(
-            text: text, voiceID: voiceID, instructions: instructions)
+        case .openAI, .localPiper:
+          audioData = try await Self.synthesizeSpeech(mode: mode, text: text)
         case .systemVoice:
           return
         }
@@ -393,6 +470,29 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       return
     }
 
+    if voice.isLocalPiper {
+      let sample = ShortcutSettings.localVoiceSampleText
+      let generation = playbackGeneration
+      playbackTask = Task { [weak self] in
+        do {
+          let audioData = try await LocalVoiceSynthesisService.shared.synthesize(text: sample)
+          try Task.checkCancellation()
+          await MainActor.run {
+            guard let self else { return }
+            guard self.playbackGeneration == generation else { return }
+            self.startPlayback(audioData)
+          }
+        } catch is CancellationError {
+          return
+        } catch {
+          if Self.isCancellation(error) { return }
+          log(
+            "FloatingBarVoicePlaybackService: local voice sample failed: \(error.localizedDescription)")
+        }
+      }
+      return
+    }
+
     if voice.isOpenAI, let openAIVoice = voice.openAIVoice {
       let generation = playbackGeneration
       playbackTask = Task { [weak self] in
@@ -441,13 +541,12 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     let mode = currentMode ?? resolvePlaybackMode()
     currentMode = mode
     switch mode {
-    case .openAI(let voiceID, let instructions):
+    case .openAI, .localPiper:
       let token = currentSynthesisToken()
       isOneShotSynthesizing = true
       Task { [weak self] in
         do {
-          let audio = try await Self.synthesizeOpenAISpeech(
-            text: trimmed, voiceID: voiceID, instructions: instructions)
+          let audio = try await Self.synthesizeSpeech(mode: mode, text: trimmed)
           await MainActor.run {
             guard let self, self.ownsCurrentSynthesisToken(token) else { return }
             self.isOneShotSynthesizing = false
@@ -478,10 +577,15 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     {
       return
     }
-    let phrase = Self.randomBackgroundAgentKickoffPhrase()
     setFloatingPillResponseGlow(true)
     let mode = currentMode ?? resolvePlaybackMode()
     currentMode = mode
+    let phrase: String
+    if case .localPiper = mode {
+      phrase = Self.randomLocalBackgroundAgentKickoffPhrase()
+    } else {
+      phrase = Self.randomBackgroundAgentKickoffPhrase()
+    }
 
     switch mode {
     case .openAI(let voiceID, let instructions):
@@ -513,6 +617,29 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
                 to: "system_voice_fallback", reason: Self.ttsFallbackReason(for: error), outcome: .degraded)
               self.enqueueSystemSpeech(phrase)
             }
+          }
+        }
+      }
+    case .localPiper:
+      let token = currentSynthesisToken()
+      isOneShotSynthesizing = true
+      Task { [weak self] in
+        do {
+          let audio = try await LocalVoiceSynthesisService.shared.synthesize(text: phrase)
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            self.startPlayback(audio, fallbackText: phrase)
+          }
+        } catch {
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            guard self.canUseCloudTTSFallback(after: error, token: token, operation: "background_kickoff")
+            else { return }
+            self.recordSelectedVoiceFallback(
+              to: "system_voice_fallback", reason: Self.ttsFallbackReason(for: error), outcome: .degraded)
+            self.enqueueSystemSpeech(phrase)
           }
         }
       }
@@ -580,6 +707,32 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     case .systemVoice:
       activeRealtimeSlowToolAcknowledgementTransport = "system_voice"
       enqueueSystemSpeech(phrase)
+    case .localPiper:
+      let localPhrase = kind.localPhrases.randomElement() ?? phrase
+      activeRealtimeSlowToolAcknowledgementTransport = "local_voice"
+      let token = currentSynthesisToken()
+      isOneShotSynthesizing = true
+      Task { [weak self] in
+        do {
+          let audio = try await LocalVoiceSynthesisService.shared.synthesize(text: localPhrase)
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            self.startPlayback(audio, fallbackText: localPhrase)
+          }
+        } catch {
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            guard self.canUseCloudTTSFallback(after: error, token: token, operation: "realtime_ack")
+            else { return }
+            self.recordSelectedVoiceFallback(
+              to: "system_voice_fallback", reason: Self.ttsFallbackReason(for: error), outcome: .degraded)
+            self.activeRealtimeSlowToolAcknowledgementTransport = "system_voice"
+            self.enqueueSystemSpeech(localPhrase)
+          }
+        }
+      }
     }
   }
 
@@ -723,9 +876,15 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     reason: String,
     outcome: DesktopFallbackOutcome
   ) {
+    let from: String
+    switch currentMode ?? resolvePlaybackMode() {
+    case .localPiper: from = "local_piper"
+    case .openAI: from = "openai_tts"
+    case .systemVoice: from = "system_voice"
+    }
     DesktopDiagnosticsManager.shared.recordFallback(
       area: activePTTLease == nil ? "tts_fallback" : "ptt_cascade",
-      from: "openai_tts",
+      from: from,
       to: to,
       reason: reason,
       outcome: outcome,
@@ -1036,6 +1195,20 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
   /// Synthesize speech through the desktop backend's OpenAI TTS proxy.
   /// APIClient attaches a user BYOK key when one is configured; otherwise the
   /// backend uses its server-side key.
+  /// One synthesis entry point for every non-system playback mode: cloud
+  /// OpenAI TTS or the on-device Piper voice selected in Settings.
+  private nonisolated static func synthesizeSpeech(mode: PlaybackMode, text: String) async throws -> Data {
+    switch mode {
+    case .openAI(let voiceID, let instructions):
+      return try await synthesizeOpenAISpeech(
+        text: text, voiceID: voiceID, instructions: instructions)
+    case .localPiper:
+      return try await LocalVoiceSynthesisService.shared.synthesize(text: text)
+    case .systemVoice:
+      throw CancellationError()
+    }
+  }
+
   private nonisolated static func synthesizeOpenAISpeech(
     text: String,
     voiceID: String,
@@ -1153,6 +1326,10 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
 
   private nonisolated static func randomBackgroundAgentKickoffPhrase() -> String {
     backgroundAgentKickoffPhrases.randomElement() ?? "Starting an agent for that now."
+  }
+
+  private nonisolated static func randomLocalBackgroundAgentKickoffPhrase() -> String {
+    localBackgroundAgentKickoffPhrases.randomElement() ?? "Bavim se tim."
   }
 
   private nonisolated static func cachedOrSynthesizedBackgroundAgentKickoffAudio(
@@ -1404,6 +1581,7 @@ enum VoiceSynthesisFallbackPolicy {
 
 private enum PlaybackMode: Sendable {
   case openAI(voiceID: String, instructions: String)
+  case localPiper
   case systemVoice(ShortcutSettings.VoiceOption)
 }
 

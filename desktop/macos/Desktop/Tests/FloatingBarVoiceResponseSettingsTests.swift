@@ -41,8 +41,21 @@ final class FloatingBarVoiceResponseSettingsTests: XCTestCase {
     XCTAssertEqual(voice.openAIVoice, "shimmer")
   }
 
-  func testOnlyOpenAIVoicesAreAvailableInPicker() {
-    XCTAssertFalse(ShortcutSettings.availableVoices.contains { $0.isLocalSystem })
+  func testVoicePickerOffersOpenAIVoicesAndTheLocalPiperVoice() {
+    XCTAssertFalse(
+      ShortcutSettings.availableVoices.contains { $0.isLocalSystem },
+      "the bare system voice is a fallback, not a picker entry")
+
+    let localVoices = ShortcutSettings.availableVoices.filter { $0.isLocalPiper }
+    XCTAssertEqual(localVoices.count, 1, "exactly one on-device voice is offered")
+    let local = localVoices[0]
+    XCTAssertEqual(local.id, ShortcutSettings.localPiperVoiceID)
+    XCTAssertEqual(local.localModelID, LocalVoiceSynthesisService.modelID)
+    XCTAssertNil(local.openAIVoice, "a local voice never routes through OpenAI")
+
+    XCTAssertEqual(
+      ShortcutSettings.defaultVoiceID, ShortcutSettings.openAIShimmerVoiceID,
+      "adding a local voice must not change the default")
   }
 
   func testLegacyProxyVoicesAreNotAvailableInPicker() {

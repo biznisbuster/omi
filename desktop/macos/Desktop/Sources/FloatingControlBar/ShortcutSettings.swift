@@ -520,6 +520,7 @@ class ShortcutSettings: ObservableObject {
     enum Provider: String, Sendable {
       case localSystem
       case openAI
+      case localPiper
     }
 
     let id: String
@@ -531,6 +532,8 @@ class ShortcutSettings: ObservableObject {
     let openAIInstructions: String?
     let preferredSystemVoiceIdentifiers: [String]
     let preferredSystemVoiceNames: [String]
+    /// Piper model id for `.localPiper` voices; nil for every other provider.
+    let localModelID: String?
 
     var isLocalSystem: Bool {
       provider == .localSystem
@@ -538,6 +541,10 @@ class ShortcutSettings: ObservableObject {
 
     var isOpenAI: Bool {
       provider == .openAI
+    }
+
+    var isLocalPiper: Bool {
+      provider == .localPiper
     }
   }
 
@@ -556,7 +563,8 @@ class ShortcutSettings: ObservableObject {
       openAIInstructions:
         "Speak in a deep, natural, grounded voice with calm confidence and smooth pacing.",
       preferredSystemVoiceIdentifiers: [],
-      preferredSystemVoiceNames: []
+      preferredSystemVoiceNames: [],
+      localModelID: nil
     ),
     VoiceOption(
       id: openAIShimmerVoiceID,
@@ -568,7 +576,8 @@ class ShortcutSettings: ObservableObject {
       openAIInstructions:
         "Speak naturally in a warm, relaxed adult tone. Keep it conversational, calm, and human without sounding exaggerated.",
       preferredSystemVoiceIdentifiers: [],
-      preferredSystemVoiceNames: []
+      preferredSystemVoiceNames: [],
+      localModelID: nil
     ),
     VoiceOption(
       id: "openai:coral",
@@ -580,7 +589,8 @@ class ShortcutSettings: ObservableObject {
       openAIInstructions:
         "Speak naturally in a warm, expressive human tone with smooth pacing and light emotional color.",
       preferredSystemVoiceIdentifiers: [],
-      preferredSystemVoiceNames: []
+      preferredSystemVoiceNames: [],
+      localModelID: nil
     ),
     VoiceOption(
       id: "openai:nova",
@@ -592,9 +602,28 @@ class ShortcutSettings: ObservableObject {
       openAIInstructions:
         "Speak in a natural, friendly, confident tone with clear articulation and relaxed pacing.",
       preferredSystemVoiceIdentifiers: [],
-      preferredSystemVoiceNames: []
+      preferredSystemVoiceNames: [],
+      localModelID: nil
+    ),
+    VoiceOption(
+      id: localPiperVoiceID,
+      name: "Srpski (lokalno)",
+      gender: .female,
+      description: "Piper, on-device Serbian voice — free, offline, no subscription",
+      provider: .localPiper,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: LocalVoiceSynthesisService.modelID
     ),
   ]
+
+  static let localPiperVoiceID = "local:piper:\(LocalVoiceSynthesisService.modelID)"
+
+  /// Preview phrase for the local Serbian voice. The English sample phrase would
+  /// be phonemized with Serbian rules, so the local voice gets its own line.
+  nonisolated static let localVoiceSampleText = "Zdravo, ovako zvučim."
 
   static let defaultVoiceID = openAIShimmerVoiceID
 
