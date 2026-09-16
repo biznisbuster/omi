@@ -116,6 +116,20 @@ final class LocalVoiceSynthesisService: Sendable {
       && fileManager.fileExists(atPath: modelConfigURL.path)
   }
 
+  /// True when the installed runtime actually answers. A venv whose interpreter
+  /// path no longer resolves (a moved or half-copied profile) keeps the
+  /// executable bit but cannot run, so installation alone is not proof.
+  func runtimeResponds() async -> Bool {
+    guard isInstalled else { return false }
+    do {
+      _ = try await Self.run(
+        executable: piperExecutableURL, arguments: ["--help"], timeout: 20)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /// Render `text` to a WAV clip entirely on this Mac.
   func synthesize(text: String) async throws -> Data {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -130,9 +144,10 @@ final class LocalVoiceSynthesisService: Sendable {
   }
 
   /// Download and prepare the Piper runtime and Serbian voice. Idempotent;
-  /// safe to call when already installed.
+  /// safe to call when already installed, and repairs a runtime that is present
+  /// but no longer executes.
   func ensureInstalled(progress: (@Sendable (String) -> Void)? = nil) async throws {
-    if isInstalled { return }
+    if await runtimeResponds() { return }
     let fileManager = FileManager.default
     let installDirectory = rootURL.appendingPathComponent("install", isDirectory: true)
     let voicesDirectory = rootURL.appendingPathComponent("voices", isDirectory: true)
@@ -152,8 +167,8 @@ final class LocalVoiceSynthesisService: Sendable {
     progress?("Preparing local voice runtime…")
     try await installRuntime(wheel: wheelFile)
 
-    guard isInstalled else {
-      throw InstallError.runtimeUnavailable("piper executable is missing after install")
+    guard await runtimeResponds() else {
+      throw InstallError.runtimeUnavailable("piper did not run after install")
     }
     progress?("Local voice ready")
   }
@@ -190,7 +205,10 @@ final class LocalVoiceSynthesisService: Sendable {
   private func installRuntime(wheel: URL) async throws {
     let fileManager = FileManager.default
     let venv = rootURL.appendingPathComponent("venv", isDirectory: true)
-    if fileManager.isExecutableFile(atPath: piperExecutableURL.path) { return }
+    if await runtimeResponds() { return }
+    if fileManager.fileExists(atPath: venv.path) {
+      try? fileManager.removeItem(at: venv)
+    }
 
     if let uv = Self.uvExecutableURL(fileManager: fileManager) {
       _ = try? await Self.run(

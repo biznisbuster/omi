@@ -1895,7 +1895,10 @@ export default async function omiProvider(pi: ExtensionAPI): Promise<void> {
 
   // Pi asks for headers once per provider request and keeps them for retries,
   // which preserves one safe correlation id across an upstream retry chain.
-  pi.on("before_provider_headers", async (event) => {
+  pi.on("before_provider_headers", async (event, ctx) => {
+    // Omi's correlation/effort headers belong to the Omi gateway lane only; a
+    // client-direct provider (OpenCode Go) must not receive them.
+    if (ctx.model && ctx.model.provider !== "omi") return;
     const raw = await omiRelayContextRaw();
     // Per-turn effort lane: typed chat runs "adaptive" (the model decides its
     // own thinking depth), PTT runs "fast" (thinking off, low effort). The
