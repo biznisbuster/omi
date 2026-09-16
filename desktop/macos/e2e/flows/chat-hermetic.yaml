@@ -97,6 +97,11 @@ covers:
   # behaviorally in AgentControlServiceTests.
   - desktop/macos/Desktop/Sources/Providers/AgentRuntimeRouting.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess+BackendRouting.swift
+  # The spawn-environment seam both routing extensions write through: this flow
+  # starts the real runtime and sends a chat turn, so the client-direct provider
+  # branch is exercised by the same spawn path (a configured OpenCode Go key is
+  # not required for the harness turn).
+  - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess+ClientDirectProvider.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess+JITKnowledgeToolsGate.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeBridgeLifecycle.swift
