@@ -1640,7 +1640,7 @@ class PushToTalkManager: ObservableObject {
           var batchResult = try await Self.runBatchTranscriptionBeforeContext(
             contextTask: self.contextCaptureTask
           ) {
-            try await TranscriptionService.batchTranscribe(
+            try await self.batchTranscribeLocalFirst(
               audioData: audioData,
               language: language,
               contextKeywords: self.currentContextSnapshot?.keywords ?? []
@@ -2466,7 +2466,7 @@ class PushToTalkManager: ObservableObject {
       do {
         let language = AssistantSettings.shared.effectiveTranscriptionLanguage
         self.activeTracer?.begin("batch_transcribe", metadata: ["reason": "hub_warm_timeout"])
-        let batchResult = try await TranscriptionService.batchTranscribe(
+        let batchResult = try await self.batchTranscribeLocalFirst(
           audioData: audio,
           language: language,
           contextKeywords: self.currentContextSnapshot?.keywords ?? []
@@ -3454,6 +3454,28 @@ class PushToTalkManager: ObservableObject {
   /// pre-recorded model with the on-screen vocabulary, then the on-device
   /// model. Each switch is recorded, so a backend that keeps losing turns to
   /// the fallback is visible.
+  /// Transcribe a PTT turn on-device first, cloud second.
+  ///
+  /// The multilingual Parakeet v3 model ships with the app on Apple Silicon and
+  /// honours the user's language; the cloud batch pool does not (a Serbian turn
+  /// came back in Cyrillic from Modulate). The cloud route stays the fallback
+  /// when the local decode yields nothing or the model cannot load, so a bad
+  /// room or mic still gets a second chance.
+  private func batchTranscribeLocalFirst(
+    audioData: Data, language: String, contextKeywords: [String]
+  ) async throws -> TranscriptionService.BatchTranscriptionResult {
+    if AppState.isAppleSilicon,
+      let local = await PTTLanguageIdentifier.shared.transcribe(pcm16k: audioData, language: language),
+      !local.isEmpty
+    {
+      log("PushToTalkManager: local STT served the turn (parakeet v3, on-device, \(local.count) chars)")
+      return TranscriptionService.BatchTranscriptionResult(
+        transcript: local, provider: "parakeet-v3", model: "on-device")
+    }
+    return try await TranscriptionService.batchTranscribe(
+      audioData: audioData, language: language, contextKeywords: contextKeywords)
+  }
+
   private func makeDictationTranscriber(
     keywords: [String], language: String, allowNetwork: Bool
   ) -> DictationTranscriber {
@@ -3469,7 +3491,7 @@ class PushToTalkManager: ObservableObject {
         guard VoiceTypeAudioTrim.speechBytes(in: audio) >= VoiceTypeAudioTrim.minimumDecodableSpeechBytes
         else { return nil }
         return await PTTLanguageIdentifier.shared.transcribe(
-          pcm16k: VoiceTypeAudioTrim.trimmingLeadingSilence(audio))
+          pcm16k: VoiceTypeAudioTrim.trimmingLeadingSilence(audio), language: language)
       },
       didFallBack: { reason in
         await MainActor.run {
@@ -4156,7 +4178,7 @@ extension PushToTalkManager {
       guard let self, self.voiceTurnCoordinator.activeTurnID == turnID else { return }
       do {
         let language = AssistantSettings.shared.effectiveTranscriptionLanguage
-        let batchResult = try await TranscriptionService.batchTranscribe(
+        let batchResult = try await self.batchTranscribeLocalFirst(
           audioData: audio, language: language,
           contextKeywords: self.currentContextSnapshot?.keywords ?? [])
         guard self.voiceTurnCoordinator.activeTurnID == turnID else { return }

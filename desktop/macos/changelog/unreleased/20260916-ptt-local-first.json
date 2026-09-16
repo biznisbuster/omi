@@ -1,0 +1,1 @@
+{"change": "Push-to-talk turns now transcribe on-device first (the local Parakeet model honours the selected language), so Serbian voice input no longer comes back in Cyrillic from the cloud pool"}

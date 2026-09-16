@@ -93,14 +93,28 @@ actor PTTLanguageIdentifier {
   /// letters or failed. Shared by both callers so transcript cleanup has one
   /// home. The TDT decoder emits literal "<unk>" for out-of-vocabulary tokens
   /// (slangy vowels etc.) — never show that in a chat bubble or paste it.
-  private func decodeText(_ samples: [Float], with manager: AsrManager, purpose: String) async -> String? {
+  ///
+  /// `languageHint` is the v3 script filter. Identification deliberately leaves
+  /// it nil (the point is to hear what language the turn is in); transcription
+  /// callers pass the user's language so the decoder cannot answer Serbian
+  /// speech in Cyrillic or in a Slovak/Czech spelling.
+  private func decodeText(
+    _ samples: [Float],
+    with manager: AsrManager,
+    purpose: String,
+    languageHint: Language? = nil,
+    language: String? = nil
+  ) async -> String? {
     do {
       var ds = try TdtDecoderState()
-      let result = try await manager.transcribe(samples, decoderState: &ds, language: nil)
-      let text = result.text
+      let result = try await manager.transcribe(samples, decoderState: &ds, language: languageHint)
+      let cleaned = result.text
         .replacingOccurrences(of: "<unk>", with: "")
         .replacingOccurrences(of: "  ", with: " ")
         .trimmingCharacters(in: .whitespacesAndNewlines)
+      let text =
+        language.map { TranscriptionLanguageOutputPolicy.normalized(cleaned, language: $0) }
+        ?? cleaned
       return text.contains(where: { $0.isLetter }) ? text : nil
     } catch {
       logError("PTTLanguageIdentifier: \(purpose) failed", error: error)
@@ -115,11 +129,22 @@ actor PTTLanguageIdentifier {
   /// does not transcribe the user's own speech until after commit, which is far
   /// too late to decide that a turn dictates instead of asks. This reuses the
   /// already-loaded multilingual model rather than standing up a second one.
-  func transcribe(pcm16k: Data) async -> String? {
+  ///
+  /// Pass `language` (the user's effective transcription language) for a turn
+  /// whose text is shown or sent: it enables the script hint and the Serbian
+  /// output repair, so the local transcript cannot come back in the wrong
+  /// language/script. Leave it nil for wake-word and identification decoding.
+  func transcribe(pcm16k: Data, language: String? = nil) async -> String? {
     guard let manager = await loadedManager() else { return nil }
     let samples = Self.int16ToFloat32(pcm16k)
     guard samples.count >= 6_400 else { return nil }
-    return await decodeText(samples, with: manager, purpose: "voice-typing decode")
+    return await decodeText(
+      samples,
+      with: manager,
+      purpose: "voice-typing decode",
+      languageHint: language.flatMap(TranscriptionLanguageOutputPolicy.parakeetLanguageHint(for:)),
+      language: language
+    )
   }
 
   /// Text-level language detection, biased toward (but not constrained to) `candidates`.
