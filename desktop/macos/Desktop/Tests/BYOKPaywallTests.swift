@@ -170,6 +170,8 @@ import XCTest
   func testByokRuntimeFingerprintTracksOnlyTheEffectiveEnvironment() {
     let savedProvider = UserDefaults.standard.string(forKey: .byokLLMProvider)
     let savedKey = UserDefaults.standard.string(forKey: BYOKProvider.openrouter.storageKey)
+    let savedClientDirectKey = UserDefaults.standard.string(forKey: BYOKProvider.opencodego.storageKey)
+    let savedModel = UserDefaults.standard.string(forKey: DefaultsKey.openCodeGoModel.rawValue)
     let savedFingerprints = APIKeyService.enrolledFingerprints()
     defer {
       if let savedProvider {
@@ -181,6 +183,16 @@ import XCTest
         UserDefaults.standard.set(savedKey, forKey: BYOKProvider.openrouter.storageKey)
       } else {
         UserDefaults.standard.removeObject(forKey: BYOKProvider.openrouter.storageKey)
+      }
+      if let savedClientDirectKey {
+        UserDefaults.standard.set(savedClientDirectKey, forKey: BYOKProvider.opencodego.storageKey)
+      } else {
+        UserDefaults.standard.removeObject(forKey: BYOKProvider.opencodego.storageKey)
+      }
+      if let savedModel {
+        UserDefaults.standard.set(savedModel, forKey: DefaultsKey.openCodeGoModel.rawValue)
+      } else {
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.openCodeGoModel.rawValue)
       }
       APIKeyService.persistEnrolledFingerprints(savedFingerprints)
     }
@@ -209,6 +221,19 @@ import XCTest
     XCTAssertNotEqual(
       APIKeyService.byokRuntimeFingerprint, enrolled,
       "switching the selected provider changes the runtime environment")
+
+    // The client-direct model is a spawn-time input too, but only once that
+    // provider's key is enrolled — without a key there is no environment.
+    UserDefaults.standard.set("sk-oc", forKey: BYOKProvider.opencodego.storageKey)
+    APIKeyService.persistEnrolledFingerprints([
+      BYOKProvider.opencodego.rawValue: APIKeyService.byokFingerprint("sk-oc")
+    ])
+    UserDefaults.standard.set("deepseek-v4-flash", forKey: DefaultsKey.openCodeGoModel.rawValue)
+    let defaultModel = APIKeyService.byokRuntimeFingerprint
+    UserDefaults.standard.set("glm-5.2", forKey: DefaultsKey.openCodeGoModel.rawValue)
+    XCTAssertNotEqual(
+      APIKeyService.byokRuntimeFingerprint, defaultModel,
+      "changing the client-direct model changes the runtime environment")
   }
 
   func testPaywallFlagSuppressedWhenByokActive() {
