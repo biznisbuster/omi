@@ -431,11 +431,12 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
             return
           }
           log(
-            "FloatingBarVoicePlaybackService: cloud TTS chunk synthesis failed, falling back to system voice: \(error.localizedDescription)"
+            "FloatingBarVoicePlaybackService: chunk synthesis failed, falling back: \(error.localizedDescription)"
           )
-          self.recordSelectedVoiceFallback(
-            to: "system_voice_fallback", reason: Self.ttsFallbackReason(for: error), outcome: .degraded)
-          self.enqueueSystemSpeech(text)
+          var allowLocal = true
+          if case .localPiper = mode { allowLocal = false }
+          self.speakWithFallback(
+            text, reason: Self.ttsFallbackReason(for: error), allowLocal: allowLocal)
           self.startSynthesisIfNeeded(mode: mode)
           self.clearFloatingPillResponseGlowIfIdle()
         }
@@ -558,11 +559,12 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
             self.isOneShotSynthesizing = false
             guard self.canUseCloudTTSFallback(after: error, token: token, operation: "one_shot") else { return }
             log(
-              "FloatingBarVoicePlaybackService: one-shot synthesis failed; rendering the same response with system voice "
-                + "reason=\(Self.ttsFallbackReason(for: error))")
-            self.recordSelectedVoiceFallback(
-              to: "system_voice_fallback", reason: Self.ttsFallbackReason(for: error), outcome: .degraded)
-            self.enqueueSystemSpeech(trimmed)
+              "FloatingBarVoicePlaybackService: one-shot synthesis failed; rendering the same response with the best "
+                + "available voice reason=\(Self.ttsFallbackReason(for: error))")
+            var allowLocal = true
+            if case .localPiper = mode { allowLocal = false }
+            self.speakWithFallback(
+              trimmed, reason: Self.ttsFallbackReason(for: error), allowLocal: allowLocal)
           }
         }
       }
@@ -613,9 +615,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
                 to: "cached_openai_tts", reason: Self.ttsFallbackReason(for: error), outcome: .recovered)
               self.startPlayback(cachedFallback, fallbackText: phrase)
             } else {
-              self.recordSelectedVoiceFallback(
-                to: "system_voice_fallback", reason: Self.ttsFallbackReason(for: error), outcome: .degraded)
-              self.enqueueSystemSpeech(phrase)
+              self.speakWithFallback(
+                phrase, reason: Self.ttsFallbackReason(for: error), allowLocal: true)
             }
           }
         }
@@ -694,8 +695,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
         activeRealtimeSlowToolAcknowledgementTransport = "selected_voice"
         startPlayback(cached, fallbackText: phrase)
       } else {
-        activeRealtimeSlowToolAcknowledgementTransport = "system_voice"
-        enqueueSystemSpeech(phrase)
+        activeRealtimeSlowToolAcknowledgementTransport = "local_voice_fallback"
+        speakWithFallback(phrase, reason: "ack_clip_unavailable", allowLocal: true)
         Task {
           _ = try? await Self.cachedOrSynthesizedRealtimeSlowToolAcknowledgementAudio(
             kind: kind,
@@ -726,10 +727,9 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
             self.isOneShotSynthesizing = false
             guard self.canUseCloudTTSFallback(after: error, token: token, operation: "realtime_ack")
             else { return }
-            self.recordSelectedVoiceFallback(
-              to: "system_voice_fallback", reason: Self.ttsFallbackReason(for: error), outcome: .degraded)
             self.activeRealtimeSlowToolAcknowledgementTransport = "system_voice"
-            self.enqueueSystemSpeech(localPhrase)
+            self.speakWithFallback(
+              localPhrase, reason: Self.ttsFallbackReason(for: error), allowLocal: false)
           }
         }
       }
@@ -1197,6 +1197,38 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
   /// backend uses its server-side key.
   /// One synthesis entry point for every non-system playback mode: cloud
   /// OpenAI TTS or the on-device Piper voice selected in Settings.
+  /// The best voice that can actually speak right now: the on-device Piper
+  /// voice when it is installed, and the OS voice only as the last resort.
+  ///
+  /// Without this, a selected cloud voice whose synthesis is refused (Omi TTS is
+  /// paywalled on a Free/client-direct account) degraded straight to the OS
+  /// voice — which reads Serbian text in an English voice, or says nothing at
+  /// all. The local voice is free, offline and honours the selected language.
+  private func speakWithFallback(_ text: String, reason: String, allowLocal: Bool) {
+    guard allowLocal, LocalVoiceSynthesisService.shared.isInstalled else {
+      recordSelectedVoiceFallback(to: "system_voice_fallback", reason: reason, outcome: .degraded)
+      enqueueSystemSpeech(text)
+      return
+    }
+    let token = currentSynthesisToken()
+    Task { [weak self] in
+      do {
+        let audio = try await LocalVoiceSynthesisService.shared.synthesize(text: text)
+        await MainActor.run {
+          guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+          self.recordSelectedVoiceFallback(to: "local_voice_fallback", reason: reason, outcome: .recovered)
+          self.startPlayback(audio, fallbackText: text)
+        }
+      } catch {
+        await MainActor.run {
+          guard let self else { return }
+          self.recordSelectedVoiceFallback(to: "system_voice_fallback", reason: reason, outcome: .degraded)
+          self.enqueueSystemSpeech(text)
+        }
+      }
+    }
+  }
+
   private nonisolated static func synthesizeSpeech(mode: PlaybackMode, text: String) async throws -> Data {
     switch mode {
     case .openAI(let voiceID, let instructions):

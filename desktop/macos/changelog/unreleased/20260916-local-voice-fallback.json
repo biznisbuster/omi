@@ -1,0 +1,1 @@
+{"change": "Voice replies now fall back to the on-device Serbian voice when the selected cloud voice cannot be synthesized (for example on a paywalled account), instead of going silent or switching to the system voice"}
