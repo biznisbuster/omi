@@ -39,6 +39,23 @@ extension DesktopAutomationActionRegistry {
     }
 
     register(
+      name: "install_local_voice",
+      summary: "Run the on-device voice install (download + runtime prep), as the Settings row does",
+      category: "voice",
+      surfaces: ["settings"],
+      safety: "local_artifact",
+      sideEffects: ["downloads ~110 MB into Application Support and creates a Python venv"]
+    ) { _ in
+      do {
+        try await LocalVoiceSynthesisService.shared.ensureInstalled()
+      } catch {
+        throw DesktopAutomationActionError.invalidParams(
+          "install failed: \(error.localizedDescription)")
+      }
+      return await MainActor.run { Self.localVoiceSnapshot() }
+    }
+
+    register(
       name: "synthesize_local_voice",
       summary:
         "Render text with the on-device Piper voice (reports not_installed instead of throwing)",
