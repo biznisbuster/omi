@@ -49,6 +49,9 @@ final class LocalTranscriptionService: @unchecked Sendable {
   }
 
   private let language: String
+  /// Script-level decoder hint for the v3 model (see the policy's doc); nil for
+  /// languages the filter has no case for, which leaves decoding unfiltered.
+  private let languageHint: Language?
   /// Source-based diarization: mic = the user ("You"), system audio = another speaker.
   private let isUser: Bool
   private let speakerLabel: String
@@ -109,6 +112,7 @@ final class LocalTranscriptionService: @unchecked Sendable {
 
   init(language: String = "en", isUser: Bool = true) {
     self.language = language
+    self.languageHint = TranscriptionLanguageOutputPolicy.parakeetLanguageHint(for: language)
     self.isUser = isUser
     self.speakerLabel = isUser ? "SPEAKER_00" : "SPEAKER_01"
     self.speakerId = isUser ? 0 : 1
@@ -287,9 +291,11 @@ final class LocalTranscriptionService: @unchecked Sendable {
       // windows makes the transducer decoder drift — it starts looping ("...AND AND AND"),
       // Title-Casing every word, and emitting gibberish. Independent per-window decode is stable.
       var ds = try TdtDecoderState()
-      let result = try await snapshot.manager.transcribe(snapshot.window, decoderState: &ds, language: nil)
+      let result = try await snapshot.manager.transcribe(
+        snapshot.window, decoderState: &ds, language: languageHint)
 
-      var text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      var text = TranscriptionLanguageOutputPolicy.normalized(result.text, language: language)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
       // Silence makes the TDT decoder emit just "." / "..." — drop windows with no real speech.
       guard text.contains(where: { $0.isLetter || $0.isNumber }) else { return }
       // NOTE: confidence is logged (below) but NOT yet used to gate — we don't know its scale

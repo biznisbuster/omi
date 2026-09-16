@@ -15,6 +15,9 @@ covers:
   - desktop/macos/Desktop/Sources/AppState/LocalTranscriptionDuplicatePolicy.swift
   - desktop/macos/Desktop/Sources/AppState/STTSessionState.swift
   - desktop/macos/Desktop/Sources/LocalTranscriptionService.swift
+  # The local decoder's language hint and the Serbian output repair run inside
+  # every captured window this flow exercises.
+  - desktop/macos/Desktop/Sources/Audio/TranscriptionLanguageOutputPolicy.swift
   - desktop/macos/Desktop/Sources/TranscriptionService.swift
   - desktop/macos/Desktop/Sources/APIClient.swift
   - desktop/macos/Desktop/Sources/Services/OmiHTTPTransport.swift

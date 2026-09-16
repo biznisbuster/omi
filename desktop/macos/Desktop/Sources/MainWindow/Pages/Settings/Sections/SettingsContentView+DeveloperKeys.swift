@@ -207,7 +207,7 @@ extension SettingsContentView {
           Text(
             hasAllBYOKKeys
               ? "You're paying your own providers. Omi skips the subscription charge. Keys stay on this Mac."
-              : "Choose a language model provider, then add its key. Deepgram is optional and only powers transcription. Keys stay on this Mac — we never store them on our servers."
+              : "Choose a language model provider, then add its key. Transcription runs on this Mac; Deepgram is only used when cloud transcription is forced. Keys stay on this Mac — we never store them on our servers."
           )
           .scaledFont(size: OmiType.caption)
           .foregroundColor(Ink.secondary)
