@@ -1,0 +1,52 @@
+version: 2
+name: local-voice
+tier: 2
+description: Select the on-device Serbian voice and exercise local Piper synthesis through the bridge (synthesis asserts the path runs; the harness Mac needs the voice installed for the synthesized branch)
+app: non-prod
+covers:
+  - desktop/macos/Desktop/Sources/Audio/LocalVoiceSynthesisService.swift
+  - desktop/macos/Desktop/Sources/DesktopAutomationBridge+LocalVoice.swift
+preconditions:
+  - auth_ready
+
+steps:
+  - id: S1
+    name: Voice catalog snapshot is readable
+    bridge.action:
+      name: voice_settings_snapshot
+    expect:
+      ok: true
+
+  - id: S2
+    name: Select the on-device Serbian voice
+    bridge.action:
+      name: select_voice
+      params:
+        voice_id: "local:piper:sr_RS-serbski_institut-medium"
+    expect:
+      ok: true
+      result.detail.selected_voice_id: "local:piper:sr_RS-serbski_institut-medium"
+      result.detail.voice_provider: "localPiper"
+      result.detail.voice_is_local_piper: "true"
+
+  - id: S3
+    name: Local synthesis runs through the app's real service
+    # `ok` is the contract everywhere; `outcome` documents which branch this Mac
+    # took (synthesized when the voice is installed, not_installed otherwise).
+    bridge.action:
+      name: synthesize_local_voice
+      params:
+        text: "Zdravo, ovako zvučim."
+    expect:
+      ok: true
+
+  - id: S4
+    name: Return the picker to the shipped default voice
+    bridge.action:
+      name: select_voice
+      params:
+        voice_id: "openai:shimmer"
+    expect:
+      ok: true
+      result.detail.selected_voice_id: "openai:shimmer"
+      result.detail.voice_provider: "openAI"

@@ -3788,6 +3788,7 @@ final class DesktopAutomationActionRegistry {
     registerNotificationActions()
     registerRatingPromptActions()
     registerGlassTransparencyActions()
+    registerLocalVoiceActions()
     registerRemotePromptActions()
     registerRealtimeHubActions()
     register(
