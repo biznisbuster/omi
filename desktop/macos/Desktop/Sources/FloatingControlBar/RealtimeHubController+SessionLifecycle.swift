@@ -608,10 +608,13 @@ extension RealtimeHubController {
       pcmPlayer = makePCMPlayer()
     }
     s.start()
+    let spawnOptionsDebug = spawnProviders.options.joined(separator: ",")
+    let preferredDebug = spawnProviders.preferred.map { " preferred=\($0)" } ?? ""
     log(
       "RealtimeHub: warming \(provider.displayName) session "
         + "(\(auth.isEphemeral ? "ephemeral/managed" : "client-direct/BYOK"), "
-        + "contextChars=\(topLevelContext.rendered.count) plan=\(topLevelContext.planID.prefix(24)))")
+        + "contextChars=\(topLevelContext.rendered.count) plan=\(topLevelContext.planID.prefix(24)), "
+        + "spawnProviders=\(spawnOptionsDebug)\(preferredDebug))")
   }
 
   struct VoiceSessionContext {
