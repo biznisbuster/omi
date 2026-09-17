@@ -109,6 +109,7 @@ covers:
   # The composer's Stop targets whichever turn is visible on this flow's shared
   # timeline, so the stop contract rides the same chat path.
   - desktop/macos/Desktop/Sources/Chat/ChatVisibleStopPolicy.swift
+  - desktop/macos/Desktop/Sources/Chat/ChatProvider+VisibleStop.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess+JITKnowledgeToolsGate.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeBridgeLifecycle.swift
