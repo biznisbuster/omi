@@ -312,9 +312,26 @@ struct TranscriptionPreferences: Codable {
   }
 }
 
-/// User language response (GET /v1/users/language)
+/// User language response (GET /v1/users/language).
+///
+/// The backend contract is nullable (`language: Optional[str]`) for an account
+/// that never picked one, and the route sends null for it. A required `String`
+/// made that response fail to decode, which aborted the whole parallel
+/// backend-settings load (language, recording permission, cloud sync,
+/// transcription preferences) with "The data couldn't be read because it is
+/// missing". Null decodes to the empty string the callers already treat as
+/// "not set".
 struct UserLanguageResponse: Codable {
   let language: String
+
+  enum CodingKeys: String, CodingKey {
+    case language
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    language = try container.decodeIfPresent(String.self, forKey: .language) ?? ""
+  }
 }
 
 /// Response shape for PATCH /v1/users/language — deliberately distinct from

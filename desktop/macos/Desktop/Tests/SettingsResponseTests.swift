@@ -7,6 +7,29 @@ import XCTest
 /// correctly map backend JSON keys to the Swift `enabled` property.
 final class SettingsResponseTests: XCTestCase {
 
+  // MARK: - UserLanguageResponse
+
+  func testDecodeUserLanguageWithAValue() throws {
+    let json = """
+      {"language": "sr"}
+      """
+    let resp = try JSONDecoder().decode(
+      UserLanguageResponse.self, from: json.data(using: .utf8)!)
+    XCTAssertEqual(resp.language, "sr")
+  }
+
+  func testDecodeUserLanguageNullMeansNotSetInsteadOfFailingTheWholeSettingsLoad() throws {
+    // The backend route declares `language: Optional[str]` and sends null for an
+    // account that never picked one. A required String failed the decode and
+    // aborted the parallel backend-settings load with a missing-value error.
+    let json = """
+      {"language": null}
+      """
+    let resp = try JSONDecoder().decode(
+      UserLanguageResponse.self, from: json.data(using: .utf8)!)
+    XCTAssertEqual(resp.language, "")
+  }
+
   // MARK: - RecordingPermissionResponse
 
   func testDecodeRecordingPermissionTrue() throws {
