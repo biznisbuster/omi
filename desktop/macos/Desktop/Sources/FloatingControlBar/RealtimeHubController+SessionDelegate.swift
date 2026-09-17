@@ -1164,6 +1164,20 @@ extension RealtimeHubController {
             "RealtimeHub: provider transcript language did not match the configured voice languages; using bounded local decode for continuity"
           )
         }
+        // The recognizer that produced the saved transcript is a per-message
+        // fact: log it and journal it on the user row so chat can show it after
+        // replay. Gemini's native audio transcribes inside the session model;
+        // OpenAI names `whisper-1` for input transcription.
+        let isOpenAI = self?.sessionProvider == .openai
+        let sttProvenance = RealtimeTranscriptProvenance.resolve(
+          resolution: resolution,
+          providerEngine: isOpenAI ? "openai-realtime" : "gemini-live",
+          providerModel: isOpenAI ? "whisper-1" : self?.session?.requestedModelID)
+        let answerModel = self?.session?.requestedModelID ?? self?.sessionProvider?.modelID ?? "unbound"
+        log(
+          "RealtimeHub: voice_turn_persisted model=\(answerModel) stt=\(sttProvenance.engine) "
+            + "stt_model=\(sttProvenance.model ?? "-") stt_lang=\(sttProvenance.language ?? "-") "
+            + "transcript_source=\(sttProvenance.source.rawValue)")
         let accepted =
           await self?.persistTurnDirectlyToKernel(
             ownerID: completedTurnOwnerID,
@@ -1171,7 +1185,8 @@ extension RealtimeHubController {
             assistantText: reply,
             terminal: .success,
             idempotencyKey: completedTurnIdempotencyKey,
-            acceptedSpawnOwnerID: acceptedSpawnOwnerID) ?? false
+            acceptedSpawnOwnerID: acceptedSpawnOwnerID,
+            sttProvenance: sttProvenance) ?? false
         if accepted, !resolution.userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
           let repliedToCard = FloatingControlBarManager.shared.recentNotchCardVoiceContext() != nil
           DesktopUsageDailyReporter.shared.recordCompletedPTTTurn(repliedToCard: repliedToCard)

@@ -33,6 +33,10 @@ struct MessageMetadata: Equatable {
   /// Provider targets observed on completion events. This must never be
   /// synthesized from the runtime adapter or requested model.
   var providerTargets: [String]
+  /// The concrete model this client asked a client-direct lane to serve
+  /// (e.g. the selected OpenCode Go model). Attribution only when the provider
+  /// reports no served identity — `modelsUsed` always wins.
+  var requestedModel: String?
   /// What was on the user's screen when this turn was asked, as text (the voice hub's accepted
   /// screen observation, bounded). Journaled on the user row so later turns can answer "do you
   /// remember what I was reading?" from conversation history even when Rewind has no frame yet.
@@ -41,6 +45,18 @@ struct MessageMetadata: Equatable {
   /// renders compact references and keeps the full body behind an evidence read
   /// boundary; this local model retains the body only for journal replay.
   var evidence: [ConversationEvidence]
+  /// Which recognizer produced a voice user turn's text: `provider` (the
+  /// realtime model's native input transcription) or `local` (the on-device
+  /// fallback recognizer). Journaled on the user row so the transcript's origin
+  /// stays visible after replay.
+  var sttSource: String?
+  /// Recognizer identity, e.g. `gemini-live` or `parakeet-v3`.
+  var sttEngine: String?
+  /// Recognizer model, when the engine names one: the realtime model whose
+  /// native transcription ran, or `on-device` for the local recognizer.
+  var sttModel: String?
+  /// Language the saved transcript was recognized as (BCP-47/ISO code).
+  var sttLanguage: String?
 
   init(
     hasScreenshot: Bool = false,
@@ -57,8 +73,13 @@ struct MessageMetadata: Equatable {
     credentialScopeLabel: String = "",
     modelsUsed: [String] = [],
     providerTargets: [String] = [],
+    requestedModel: String? = nil,
     screenContext: String? = nil,
-    evidence: [ConversationEvidence] = []
+    evidence: [ConversationEvidence] = [],
+    sttSource: String? = nil,
+    sttEngine: String? = nil,
+    sttModel: String? = nil,
+    sttLanguage: String? = nil
   ) {
     self.hasScreenshot = hasScreenshot
     self.screenshotSizeBytes = screenshotSizeBytes
@@ -74,8 +95,13 @@ struct MessageMetadata: Equatable {
     self.credentialScopeLabel = credentialScopeLabel
     self.modelsUsed = modelsUsed
     self.providerTargets = providerTargets
+    self.requestedModel = requestedModel
     self.screenContext = screenContext
     self.evidence = evidence
+    self.sttSource = sttSource
+    self.sttEngine = sttEngine
+    self.sttModel = sttModel
+    self.sttLanguage = sttLanguage
   }
 
   static func fromCompletedTurn(
@@ -86,7 +112,8 @@ struct MessageMetadata: Equatable {
     sqlRowsReturned: Int,
     sqlQueryCount: Int,
     modelsUsed: [String] = [],
-    providerTargets: [String] = []
+    providerTargets: [String] = [],
+    requestedModel: String? = nil
   ) -> MessageMetadata {
     let allowedToolNames = snapshot.capabilities["allowedToolNames"] as? [String] ?? []
     return MessageMetadata(
@@ -103,7 +130,8 @@ struct MessageMetadata: Equatable {
       adapterId: profile.adapterId,
       credentialScopeLabel: Self.credentialLabel(profile.credentialScope),
       modelsUsed: modelsUsed,
-      providerTargets: providerTargets
+      providerTargets: providerTargets,
+      requestedModel: requestedModel
     )
   }
 
@@ -132,12 +160,33 @@ struct MessageMetadata: Equatable {
     modelsUsed.joined(separator: ", ")
   }
 
+  /// Always-visible attribution caption: the served identity when the provider
+  /// named one, otherwise the concrete model this client requested from a
+  /// client-direct lane, marked as requested so it is never read as served.
+  var modelAttributionSummary: String? {
+    if !modelsUsed.isEmpty { return modelsUsed.joined(separator: ", ") }
+    if let requestedModel, !requestedModel.isEmpty { return "\(requestedModel) (requested)" }
+    return nil
+  }
+
   var providersSummary: String {
     providerTargets.joined(separator: ", ")
   }
 
   var pathSummary: String {
     [adapterId, credentialScopeLabel].filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+
+  /// "Transcribed by" line for a voice user turn: engine · model · language.
+  /// Nil when no recognizer provenance was recorded (typed and legacy rows).
+  var sttSummary: String? {
+    guard let engine = sttEngine, !engine.isEmpty else { return nil }
+    var parts = [engine]
+    if let model = sttModel, !model.isEmpty { parts.append(model) }
+    // `on-device` is the local recognizer's model label; do not say it twice.
+    if sttSource == "local", sttModel != "on-device" { parts.append("on-device") }
+    if let language = sttLanguage, !language.isEmpty { parts.append(language) }
+    return parts.joined(separator: " · ")
   }
 
   var sqlSummary: String? {

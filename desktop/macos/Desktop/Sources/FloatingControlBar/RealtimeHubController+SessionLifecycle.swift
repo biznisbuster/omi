@@ -1004,7 +1004,8 @@ extension RealtimeHubController {
     idempotencyKey: String,
     acceptedSpawnOwnerID: String?,
     delivery: VoiceTurnJournalStatusPolicy.AnswerDelivery = .pending,
-    answerTextCompleted: Bool? = nil
+    answerTextCompleted: Bool? = nil,
+    sttProvenance: RealtimeTranscriptProvenance? = nil
   ) async -> Bool {
     var journalStatus = VoiceTurnJournalStatusPolicy.status(
       for: terminal, delivery: delivery)
@@ -1065,7 +1066,8 @@ extension RealtimeHubController {
       continuityKey: idempotencyKey,
       assistantStatus: journalStatus,
       terminalReason: terminalReason,
-      answerTextCompleted: rowAnswerTextCompleted
+      answerTextCompleted: rowAnswerTextCompleted,
+      sttProvenance: sttProvenance
     ) {
     case .completed(let accepted):
       fenceNativeTurnEvidence(ownerID: ownerID, continuityKey: idempotencyKey)

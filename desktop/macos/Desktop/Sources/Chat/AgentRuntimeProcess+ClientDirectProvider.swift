@@ -32,4 +32,13 @@ extension AgentRuntimeProcess {
     let stored = UserDefaults.standard.string(forKey: DefaultsKey.openCodeGoModel.rawValue) ?? ""
     return OpenCodeGoCatalog.models.contains { $0.id == stored } ? stored : OpenCodeGoCatalog.defaultModelID
   }
+
+  /// The concrete model this Mac asks a client-direct lane to serve, for lanes
+  /// where the adapter owns model selection. Nil for managed lanes, where the
+  /// gateway owns the model and only a provider-reported served identity may be
+  /// attributed.
+  static func configuredClientDirectModel() -> String? {
+    guard APIKeyService.selectedBYOKLLMProvider == .opencodego else { return nil }
+    return openCodeGoModel()
+  }
 }

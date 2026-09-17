@@ -370,10 +370,16 @@ extension KernelJournalTurn {
     )
     if message.sender == .user {
       let evidence = ConversationEvidenceMetadataCodec.envelope(from: metadataJSON)?.items ?? []
-      if !evidence.isEmpty || metadata["screen_context"] as? String != nil {
+      let stt = metadata["stt"] as? [String: Any]
+      let sttEngine = stt?["engine"] as? String
+      if !evidence.isEmpty || metadata["screen_context"] as? String != nil || sttEngine != nil {
         message.metadata = MessageMetadata(
           screenContext: metadata["screen_context"] as? String,
-          evidence: evidence
+          evidence: evidence,
+          sttSource: stt?["source"] as? String,
+          sttEngine: sttEngine,
+          sttModel: stt?["model"] as? String,
+          sttLanguage: stt?["language"] as? String
         )
       }
     }
@@ -383,11 +389,13 @@ extension KernelJournalTurn {
     if message.sender == .ai {
       let models = metadata["modelsUsed"] as? [String] ?? []
       let providers = metadata["providerTargets"] as? [String] ?? []
-      if !models.isEmpty || !providers.isEmpty {
+      let requestedModel = metadata["requestedModel"] as? String
+      if !models.isEmpty || !providers.isEmpty || requestedModel != nil {
         message.metadata = MessageMetadata(
           adapterId: origin == "realtime_voice" ? "realtime" : "",
           modelsUsed: models,
-          providerTargets: providers
+          providerTargets: providers,
+          requestedModel: requestedModel
         )
       }
     }
@@ -420,6 +428,9 @@ extension ChatMessage {
     if let providers = self.metadata?.providerTargets, !providers.isEmpty {
       metadata["providerTargets"] = providers
     }
+    if let requestedModel = self.metadata?.requestedModel, !requestedModel.isEmpty {
+      metadata["requestedModel"] = requestedModel
+    }
     if let notificationContext { metadata["notificationContext"] = notificationContext }
     if let screenContext = self.metadata?.screenContext, !screenContext.isEmpty {
       metadata["screen_context"] = String(screenContext.prefix(1_200))
@@ -429,6 +440,13 @@ extension ChatMessage {
       if let encoded = ConversationEvidenceMetadataCodec.encodeEnvelope(envelope) {
         metadata[ConversationEvidenceMetadataCodec.metadataKey] = encoded
       }
+    }
+    if let engine = self.metadata?.sttEngine, !engine.isEmpty {
+      var stt: [String: String] = ["engine": engine]
+      if let source = self.metadata?.sttSource, !source.isEmpty { stt["source"] = source }
+      if let model = self.metadata?.sttModel, !model.isEmpty { stt["model"] = model }
+      if let language = self.metadata?.sttLanguage, !language.isEmpty { stt["language"] = language }
+      metadata["stt"] = stt
     }
     // These rollback-compatible fields are consumed only by the kernel outbox
     // renderer for the existing /v2/desktop/messages POST shape.
@@ -472,6 +490,27 @@ extension ChatMessage {
     var updateMetadata: [String: Any] = [:]
     if let terminalReason { updateMetadata["terminalReason"] = terminalReason }
     if answerTextCompleted == true { updateMetadata["answerTextCompleted"] = true }
+    // Attribution observed after admission (served models, recognizer
+    // provenance) and the user row's screen context are re-sent on the update:
+    // the kernel replaces metadata_json with this object, so omitting them here
+    // would wipe evidence that only exists on the in-memory row.
+    if let models = self.metadata?.modelsUsed, !models.isEmpty { updateMetadata["modelsUsed"] = models }
+    if let providers = self.metadata?.providerTargets, !providers.isEmpty {
+      updateMetadata["providerTargets"] = providers
+    }
+    if let requestedModel = self.metadata?.requestedModel, !requestedModel.isEmpty {
+      updateMetadata["requestedModel"] = requestedModel
+    }
+    if let screenContext = self.metadata?.screenContext, !screenContext.isEmpty {
+      updateMetadata["screen_context"] = String(screenContext.prefix(1_200))
+    }
+    if let engine = self.metadata?.sttEngine, !engine.isEmpty {
+      var stt: [String: String] = ["engine": engine]
+      if let source = self.metadata?.sttSource, !source.isEmpty { stt["source"] = source }
+      if let model = self.metadata?.sttModel, !model.isEmpty { stt["model"] = model }
+      if let language = self.metadata?.sttLanguage, !language.isEmpty { stt["language"] = language }
+      updateMetadata["stt"] = stt
+    }
     var metadataJSON: String?
     if !updateMetadata.isEmpty,
       let data = try? JSONSerialization.data(withJSONObject: updateMetadata),

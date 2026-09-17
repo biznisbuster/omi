@@ -313,6 +313,29 @@ struct ChatMessageTimestamp: View {
   }
 }
 
+/// Which model answered a row, or which recognizer produced the user's words.
+///
+/// Always visible (not hover-gated) because it is the reader's evidence trail,
+/// and quiet — one micro-type line under the bubble, same rung as the timestamp.
+/// The facts are journaled per turn, so the caption survives replay.
+struct ChatRowProvenanceCaption: View {
+  let systemImage: String
+  let text: String
+
+  var body: some View {
+    HStack(spacing: OmiSpacing.xxs) {
+      Image(systemName: systemImage)
+        .scaledFont(size: OmiType.micro)
+      Text(text)
+        .scaledFont(size: OmiType.micro)
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .foregroundColor(Ink.secondary)
+    .accessibilityElement(children: .combine)
+  }
+}
+
 /// The time a row arrived, at the length it is actually read at.
 ///
 /// `Aug 6, 2026 at 1:28 PM` under every reply is a date stamp on a chat message:
@@ -623,6 +646,16 @@ enum ChatBubbleIdentity {
       && lhs.journalStatus == rhs.journalStatus
       && lhs.citations.map(\.id) == rhs.citations.map(\.id)
       && (lhs.metadata != nil) == (rhs.metadata != nil)
+      // The always-visible provenance caption reads these fields, and they
+      // arrive after the row's first render (served model at completion,
+      // recognizer provenance at finalization), so identity must compare them.
+      && lhs.metadata?.modelsUsed == rhs.metadata?.modelsUsed
+      && lhs.metadata?.providerTargets == rhs.metadata?.providerTargets
+      && lhs.metadata?.requestedModel == rhs.metadata?.requestedModel
+      && lhs.metadata?.sttEngine == rhs.metadata?.sttEngine
+      && lhs.metadata?.sttModel == rhs.metadata?.sttModel
+      && lhs.metadata?.sttLanguage == rhs.metadata?.sttLanguage
+      && lhs.metadata?.sttSource == rhs.metadata?.sttSource
       // Direct field equality. This used to go through
       // `ChatContentBlockCodec.comparisonData`, which JSON-encoded BOTH sides of
       // every unchanged row — two serializations per bubble per transcript

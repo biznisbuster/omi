@@ -64,11 +64,15 @@ struct RealtimeStreamingJournalProjection: Equatable {
   /// model's optional screen report. It is frozen into the existing streaming
   /// persistence obligation so late OCR cannot drift to another turn.
   let evidence: [ConversationEvidence]
+  /// Recognizer provenance for the user row. Known only after transcript
+  /// resolution, so it is attached at finalization (see `withSTTProvenance`).
+  let sttProvenance: RealtimeTranscriptProvenance?
 
   init(
     ownerID: String, continuityKey: String, admissionSurface: AgentSurfaceReference,
     modelsUsed: [String] = [], screenContext: String? = nil,
-    evidence: [ConversationEvidence] = []
+    evidence: [ConversationEvidence] = [],
+    sttProvenance: RealtimeTranscriptProvenance? = nil
   ) {
     self.ownerID = ownerID
     self.continuityKey = continuityKey
@@ -76,8 +80,21 @@ struct RealtimeStreamingJournalProjection: Equatable {
     self.modelsUsed = modelsUsed
     self.screenContext = screenContext
     self.evidence = evidence
+    self.sttProvenance = sttProvenance
     userTurnID = KernelTurnProjection.stableTurnID(continuityKey: continuityKey, role: "user")
     assistantTurnID = KernelTurnProjection.stableTurnID(continuityKey: continuityKey, role: "assistant")
+  }
+
+  /// Same turn, with the recognizer provenance resolved later in the turn.
+  func withSTTProvenance(_ provenance: RealtimeTranscriptProvenance?) -> Self {
+    RealtimeStreamingJournalProjection(
+      ownerID: ownerID,
+      continuityKey: continuityKey,
+      admissionSurface: admissionSurface,
+      modelsUsed: modelsUsed,
+      screenContext: screenContext,
+      evidence: evidence,
+      sttProvenance: provenance)
   }
 
   func userMessage(text: String) -> ChatMessage {
@@ -87,8 +104,15 @@ struct RealtimeStreamingJournalProjection: Equatable {
       text: text,
       sender: .user
     )
-    if !evidence.isEmpty || !(screenContext?.isEmpty ?? true) {
-      message.metadata = MessageMetadata(screenContext: screenContext, evidence: evidence)
+    if !evidence.isEmpty || !(screenContext?.isEmpty ?? true) || sttProvenance != nil {
+      message.metadata = MessageMetadata(
+        screenContext: screenContext,
+        evidence: evidence,
+        sttSource: sttProvenance?.source.rawValue,
+        sttEngine: sttProvenance?.engine,
+        sttModel: sttProvenance?.model,
+        sttLanguage: sttProvenance?.language
+      )
     }
     return message
   }
@@ -501,6 +525,48 @@ struct RealtimeHubTranscriptResolution: Equatable {
   let localTranscript: String?
   let localLanguage: String?
   let usedLocalTranscript: Bool
+}
+
+/// Which recognizer produced the journaled voice user text, and in which
+/// language.
+///
+/// Provider-native transcription runs inside the realtime session (`gemini-live`
+/// native audio, OpenAI's `whisper-1` input transcription); the local fallback
+/// is the on-device Parakeet recognizer. Journaled on the user row so the
+/// transcript's origin stays visible after replay.
+struct RealtimeTranscriptProvenance: Equatable {
+  enum Source: String, Equatable {
+    case provider
+    case local
+  }
+
+  let source: Source
+  /// Recognizer engine, e.g. `gemini-live`, `openai-realtime`, `parakeet-v3`.
+  let engine: String
+  /// Recognizer model when the engine names one (`whisper-1`, the Gemini Live
+  /// model doing native transcription, or `on-device` for the local recognizer).
+  let model: String?
+  /// Language the saved transcript was recognized as.
+  let language: String?
+
+  static func resolve(
+    resolution: RealtimeHubTranscriptResolution,
+    providerEngine: String,
+    providerModel: String?
+  ) -> RealtimeTranscriptProvenance {
+    if resolution.usedLocalTranscript {
+      return RealtimeTranscriptProvenance(
+        source: .local,
+        engine: "parakeet-v3",
+        model: "on-device",
+        language: resolution.localLanguage)
+    }
+    return RealtimeTranscriptProvenance(
+      source: .provider,
+      engine: providerEngine,
+      model: providerModel,
+      language: resolution.providerLanguage)
+  }
 }
 
 enum RealtimeHubTranscriptPolicy {

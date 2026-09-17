@@ -40,7 +40,10 @@ extension RealtimeHubController {
     let projection = RealtimeStreamingJournalProjection(
       ownerID: ownerID, continuityKey: turnIdempotencyKey,
       admissionSurface: FloatingControlBarManager.shared.mainChatSurfaceReference(),
-      modelsUsed: [sessionProvider?.modelID].compactMap { $0 },
+      // The EFFECTIVE session model — the BYOK voice-model choice and a
+      // model-level fallback both live in `requestedModelID`. The provider's
+      // catalog id (`provider.modelID`) is only the default and mislabels both.
+      modelsUsed: [session?.requestedModelID].compactMap { $0 },
       screenContext: screenContextByContinuityKey[turnIdempotencyKey],
       evidence: nativeEvidence)
     guard
@@ -176,13 +179,15 @@ extension RealtimeHubController {
     continuityKey: String,
     assistantStatus: KernelJournalTurnStatus = .completed,
     terminalReason: String? = nil,
-    answerTextCompleted: Bool? = nil
+    answerTextCompleted: Bool? = nil,
+    sttProvenance: RealtimeTranscriptProvenance? = nil
   ) async -> RealtimeStreamingJournalWriteLedger.FinalizationResult {
     streamingJournalFlushTasks.removeValue(forKey: continuityKey)?.cancel()
     return await streamingJournalWriteLedger.finalize(continuityKey: continuityKey) { projection in
       guard projection.ownerID == ownerID else { return false }
       return await FloatingControlBarManager.shared.completeStreamingRealtimeExchange(
-        projection: projection, userText: userText, assistantText: assistantText,
+        projection: projection.withSTTProvenance(sttProvenance), userText: userText,
+        assistantText: assistantText,
         assistantStatus: assistantStatus, terminalReason: terminalReason,
         answerTextCompleted: answerTextCompleted)
     }

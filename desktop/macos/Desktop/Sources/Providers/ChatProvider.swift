@@ -4080,6 +4080,16 @@ class ChatProvider: ObservableObject {
     }
     journalOwnerByMessageID.removeValue(forKey: target.assistantMessageId)
     target.onFinalized?(accepted)
+    // Served-model evidence is observed at completion, after admission: publish
+    // it as a durable non-regressing metadata update so replay and relaunch keep
+    // the attribution that in-memory metadata would otherwise lose.
+    if accepted,
+      let metadata = message?.metadata,
+      !metadata.modelsUsed.isEmpty || !metadata.providerTargets.isEmpty
+        || !(metadata.requestedModel ?? "").isEmpty
+    {
+      scheduleJournalUpdate(messageId: target.assistantMessageId)
+    }
     return accepted
   }
 
@@ -5667,7 +5677,19 @@ class ChatProvider: ObservableObject {
             sqlRowsReturned: metricsSnapshot.sqlRowsReturned,
             sqlQueryCount: metricsSnapshot.sqlQueryCount,
             modelsUsed: queryResult.modelsUsed,
-            providerTargets: queryResult.providerTargets
+            providerTargets: queryResult.providerTargets,
+            requestedModel: AgentRuntimeProcess.configuredClientDirectModel()
+          )
+          // Per-turn model provenance: the requested profile and adapter are
+          // always known; the served identity is only reported when the
+          // provider names one, so say "unreported" instead of guessing.
+          log(
+            "ChatProvider: turn \(telemetryAttempt.context.attemptId) model_profile="
+              + "\(kernelContext.session.profile.modelProfile ?? "-") adapter="
+              + "\(kernelContext.session.profile.adapterId) served_models="
+              + "\(queryResult.modelsUsed.isEmpty ? "unreported" : queryResult.modelsUsed.joined(separator: ",")) "
+              + "providers="
+              + "\(queryResult.providerTargets.isEmpty ? "unreported" : queryResult.providerTargets.joined(separator: ","))"
           )
           completeRemainingToolCalls(
             messageId: aiMessageId,

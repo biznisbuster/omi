@@ -1,0 +1,3 @@
+{
+  "change": "Chat messages now show which model answered (text or voice) and which recognizer transcribed your speech"
+}

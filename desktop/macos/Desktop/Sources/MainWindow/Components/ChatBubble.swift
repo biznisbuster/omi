@@ -484,6 +484,22 @@ struct ChatBubble: View {
       .foregroundColor(Ink.secondary)
     }
 
+    // **Per-message provenance, always visible.** Which model produced this
+    // answer (voice or typed) and which recognizer produced the user's words
+    // are facts the reader asked for; the hover band below stays reserved for
+    // actions.
+    if message.sender == .ai, !message.isStreaming,
+      let model = message.metadata?.modelAttributionSummary
+    {
+      ChatRowProvenanceCaption(
+        systemImage: message.metadata?.adapterId == "realtime" ? "waveform" : "cpu",
+        text: model
+      )
+    }
+    if message.sender == .user, let stt = message.metadata?.sttSummary {
+      ChatRowProvenanceCaption(systemImage: "mic.fill", text: "transcribed by \(stt)")
+    }
+
     switch ChatBubbleMetadataBand.of(message, hasCopyableText: !rowText.answer.isEmpty) {
     case .hidden:
       EmptyView()

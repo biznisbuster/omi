@@ -1688,7 +1688,11 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
     }
     if let parts = (sc["modelTurn"] as? [String: Any])?["parts"] as? [[String: Any]] {
       for p in parts {
-        if let t = p["text"] as? String { emitText(t, isFinal: false) }
+        // Thought summaries are the model's plan, not its answer: they must
+        // never enter the transcript or the no-audio spoken fallback.
+        if let t = GeminiRealtimeContentPolicy.visibleText(inPart: p) {
+          emitText(t, isFinal: false)
+        }
         if let inline = p["inlineData"] as? [String: Any],
           let mime = inline["mimeType"] as? String, mime.contains("audio/pcm"),
           let b64 = inline["data"] as? String, let d = Data(base64Encoded: b64)
