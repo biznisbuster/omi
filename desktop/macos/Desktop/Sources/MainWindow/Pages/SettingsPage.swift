@@ -370,6 +370,8 @@ struct SettingsContentView: View {
     PTTDictationTranscriptionPreference.sameAsTranscription.rawValue
   @AppStorage(TranscriptEngineClient.baseURLDefaultsKey) var transcriptEngineBaseURL: String = ""
   @AppStorage(PTTVoiceMode.defaultsKey) var pttVoiceMode: String = PTTVoiceMode.live.rawValue
+  @AppStorage(RealtimeHubVoicePolicy.geminiVoiceDefaultsKey) var realtimeGeminiVoice: String =
+    RealtimeHubVoicePolicy.defaultGeminiVoice
   @AppStorage(BackgroundAgentProvider.defaultsKey) var backgroundAgentProvider: String =
     BackgroundAgentProvider.omiManaged.rawValue
   @AppStorage("askModeEnabled") var askModeEnabled = false

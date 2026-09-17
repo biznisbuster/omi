@@ -2220,13 +2220,21 @@ class PushToTalkManager: ObservableObject {
   /// live partial text while the key is held. The engine decodes as the audio
   /// arrives, so key-up waits only for the tail instead of the whole utterance.
   private func startTranscriptEngineStream() {
-    let stream = TranscriptEngineStreamClient()
-    transcriptEngineStream = stream
     let language = AssistantSettings.shared.effectiveTranscriptionLanguage
     transcriptEngineStreamStartTask = Task { [weak self] in
+      // Find the running engine before dialing it: the engine's port can move
+      // between launches, and reporting "not answering" while it runs one port
+      // over is the wrong answer. A resolved neighbour is adopted so every
+      // later (synchronous) reader follows it too.
+      if case .resolved(let resolution) = await TranscriptEngineDiscovery.resolve() {
+        TranscriptEngineDiscovery.adopt(resolution)
+      }
+      guard let self, !Task.isCancelled else { return }
+      let stream = TranscriptEngineStreamClient()
+      self.transcriptEngineStream = stream
       do {
         try await stream.start(language: language)
-        guard let self, !Task.isCancelled, self.transcriptEngineStream === stream else {
+        guard !Task.isCancelled, self.transcriptEngineStream === stream else {
           await stream.cancel()
           return
         }
@@ -2234,7 +2242,7 @@ class PushToTalkManager: ObservableObject {
       } catch {
         // The engine is the user's chosen recognizer; say it is not answering
         // instead of silently transcribing with something else.
-        guard let self, self.transcriptEngineStream === stream else { return }
+        guard self.transcriptEngineStream === stream else { return }
         self.noteTranscriptEngineUnavailable(error)
       }
     }
@@ -3654,6 +3662,9 @@ class PushToTalkManager: ObservableObject {
     // unsupported engine must not strand the turn: it falls through to the
     // built-in chain with the failure recorded.
     if preference == .transcriptEngine {
+      if case .resolved(let resolution) = await TranscriptEngineDiscovery.resolve() {
+        TranscriptEngineDiscovery.adopt(resolution)
+      }
       do {
         let started = Date()
         let result = try await TranscriptEngineClient.configured.transcribe(
@@ -3730,13 +3741,18 @@ class PushToTalkManager: ObservableObject {
       backend: { audio in
         // The user's pinned recognizer decodes dictation too; the built-in
         // cloud batch recognizer is the fallback when it cannot.
-        if preference == .transcriptEngine,
-          let result = try? await TranscriptEngineClient.configured.transcribe(
+        if preference == .transcriptEngine {
+          // Follow the engine if it moved ports since the last dictation.
+          if case .resolved(let resolution) = await TranscriptEngineDiscovery.resolve() {
+            TranscriptEngineDiscovery.adopt(resolution)
+          }
+          if let result = try? await TranscriptEngineClient.configured.transcribe(
             pcm16k: audio, language: language),
-          !result.transcript.isEmpty
-        {
-          label.set("transcript-engine/\(result.model ?? "-")")
-          return result.transcript
+            !result.transcript.isEmpty
+          {
+            label.set("transcript-engine/\(result.model ?? "-")")
+            return result.transcript
+          }
         }
         let cloud = try await TranscriptionService.batchTranscribe(
           audioData: audio, language: language, contextKeywords: keywords)

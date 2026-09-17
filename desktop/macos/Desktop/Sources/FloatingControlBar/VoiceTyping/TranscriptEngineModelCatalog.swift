@@ -37,6 +37,13 @@ final class TranscriptEngineModelCatalog: ObservableObject {
     case unavailable(String)
   }
 
+  /// One registry read: the active model plus every registered entry. Shared
+  /// with discovery, which uses the same answer as proof of a live engine.
+  struct Registry: Equatable {
+    let activeModelID: String?
+    let entries: [Entry]
+  }
+
   static let shared = TranscriptEngineModelCatalog()
 
   @Published private(set) var state: State = .idle
@@ -44,12 +51,18 @@ final class TranscriptEngineModelCatalog: ObservableObject {
   @Published private(set) var activationNotice: String?
   @Published private(set) var isActivating = false
 
-  private let baseURL: URL
+  private let baseURLOverride: URL?
   private let session: URLSession
 
   init(baseURL: URL? = nil, session: URLSession = .shared) {
-    self.baseURL = baseURL ?? TranscriptEngineClient.configured.baseURL
+    self.baseURLOverride = baseURL
     self.session = session
+  }
+
+  /// Resolved per call, not cached at init: discovery may adopt a moved engine
+  /// address while this pane is open.
+  private var baseURL: URL {
+    baseURLOverride ?? TranscriptEngineClient.configured.baseURL
   }
 
   var activeModelID: String? {
@@ -118,10 +131,16 @@ final class TranscriptEngineModelCatalog: ObservableObject {
   // MARK: - Pure parsing (testable without a server)
 
   nonisolated static func parseModels(_ data: Data) -> [Entry] {
+    parseRegistry(data)?.entries ?? []
+  }
+
+  /// The whole registry answer, or nil when the payload is not the engine's
+  /// model registry at all (the proof discovery uses).
+  nonisolated static func parseRegistry(_ data: Data) -> Registry? {
     guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let rawModels = payload["models"] as? [[String: Any]]
-    else { return [] }
-    return rawModels.compactMap { raw in
+    else { return nil }
+    let entries = rawModels.compactMap { raw -> Entry? in
       guard let id = (raw["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
         !id.isEmpty
       else { return nil }
@@ -132,6 +151,9 @@ final class TranscriptEngineModelCatalog: ObservableObject {
         loadState: raw["load_state"] as? String ?? "",
         contentState: raw["content_state"] as? String ?? "")
     }
+    guard !entries.isEmpty else { return nil }
+    let activeID = entries.first(where: \.active)?.id
+    return Registry(activeModelID: activeID, entries: entries)
   }
 
   struct ActivationResult: Equatable {

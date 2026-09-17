@@ -23,6 +23,7 @@ extension SettingsContentView {
       if mode == .live {
         advancedCategoryHeader(title: "Live Voice", icon: "waveform")
         realtimeVoiceModelCard
+        liveVoiceCard
       } else {
         advancedCategoryHeader(title: "Transcript Voice", icon: "text.bubble")
         transcriptionModelCard
@@ -127,6 +128,56 @@ extension SettingsContentView {
           .foregroundColor(SettingsInk.notice)
           .fixedSize(horizontal: false, vertical: true)
         }
+      }
+    }
+  }
+
+  /// The voice the Live model speaks with. Gemini Live speaks natively, so
+  /// this is the voice a Voice Live answer actually uses; the TTS picker below
+  /// is only the fallback for text that arrives without audio.
+  private var liveVoiceCard: some View {
+    let voiceModel = RealtimeOmniProvider(rawValue: realtimeOmniProvider) ?? .geminiFlashLive
+    let isGemini = RealtimeOmniSettings.shared.effectiveProvider != .gptRealtime2
+    return settingsCard(settingId: "voice.livevoice") {
+      VStack(alignment: .leading, spacing: OmiSpacing.md) {
+        HStack {
+          Image(systemName: "speaker.wave.3")
+            .scaledFont(size: OmiType.subheading)
+            .foregroundColor(Ink.secondary)
+
+          Text("Live Voice")
+            .scaledFont(size: OmiType.subheading, weight: .semibold)
+            .foregroundColor(Ink.primary)
+
+          Spacer()
+
+          if isGemini {
+            SettingsMenuPicker(selection: $realtimeGeminiVoice) {
+              ForEach(RealtimeHubVoicePolicy.selectableGeminiVoices, id: \.name) { voice in
+                Text(voice.label).tag(voice.name)
+              }
+            }
+            .accessibilityIdentifier("voice.live_voice")
+            .onChange(of: realtimeGeminiVoice) { _, _ in
+              // The session's speech config is baked when the warm session is
+              // built, so a changed voice must rebuild it.
+              NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
+            }
+          }
+        }
+
+        Text(
+          isGemini
+            ? "The voice the Live model speaks with. It is baked into the warm session, so a change takes effect on the next answer."
+            : "The Live model speaks with its provider's fixed family voice (\(RealtimeHubVoicePolicy.voiceName(for: .openai))); the Gemini voice list applies when the Voice Model is a Gemini Live model."
+        )
+        .scaledFont(size: OmiType.caption)
+        .foregroundColor(Ink.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+        Text("Voice Model: \(voiceModel.displayName)")
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
       }
     }
   }
@@ -676,6 +727,8 @@ extension SettingsContentView {
 /// switch already happened.
 private struct TranscriptEngineModelChooser: View {
   @ObservedObject private var catalog = TranscriptEngineModelCatalog.shared
+  @State private var discoveryNote: String?
+  @State private var discoveryFound = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: OmiSpacing.sm) {
@@ -691,12 +744,19 @@ private struct TranscriptEngineModelChooser: View {
           ProgressView().controlSize(.mini)
         } else {
           Button("Refresh") {
-            Task { await catalog.refresh() }
+            Task { await refreshAll() }
           }
           .buttonStyle(.plain)
           .scaledFont(size: OmiType.caption, weight: .medium)
           .foregroundColor(Ink.secondary)
         }
+      }
+
+      if let discoveryNote {
+        Text(discoveryNote)
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(discoveryFound ? Ink.secondary : SettingsInk.notice)
+          .fixedSize(horizontal: false, vertical: true)
       }
 
       switch catalog.state {
@@ -744,6 +804,29 @@ private struct TranscriptEngineModelChooser: View {
           .fixedSize(horizontal: false, vertical: true)
       }
     }
-    .task { await catalog.refresh() }
+    .task { await refreshAll() }
+  }
+
+  /// Finds the running engine first (its port can move), adopts a moved
+  /// address, and says what happened instead of a bare "not answering".
+  private func refreshAll() async {
+    switch await TranscriptEngineDiscovery.resolve() {
+    case .resolved(let resolution):
+      TranscriptEngineDiscovery.adopt(resolution)
+      discoveryFound = true
+      if resolution.movedFromConfiguredAddress {
+        let model = resolution.activeModelID.map { " · \($0)" } ?? ""
+        discoveryNote =
+          "Engine found at \(resolution.url.absoluteString)\(model) — the address was updated."
+      } else {
+        discoveryNote = nil
+      }
+    case .notRunning(let tried):
+      discoveryFound = false
+      let addresses = tried.map(\.absoluteString).joined(separator: ", ")
+      discoveryNote =
+        "Nothing is listening on \(addresses). Start your engine, or set its address above."
+    }
+    await catalog.refresh()
   }
 }

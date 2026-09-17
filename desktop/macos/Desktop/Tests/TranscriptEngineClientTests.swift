@@ -5,17 +5,25 @@ import XCTest
 private final class TranscriptEngineURLStub: URLProtocol, @unchecked Sendable {
   private static let lock = NSLock()
   private nonisolated(unsafe) static var routes: [String: (Int, Data)] = [:]
+  /// Routes that only answer on one port, so discovery can be scripted on a
+  /// landscape where the configured port is silent and a neighbour answers.
+  private nonisolated(unsafe) static var portRoutes: [String: (Int, Data)] = [:]
   private nonisolated(unsafe) static var requests: [(path: String, method: String, body: Data?)] = []
 
   static func reset() {
     lock.withLock {
       routes = [:]
+      portRoutes = [:]
       requests = []
     }
   }
 
   static func respond(path: String, status: Int = 200, json: String) {
     lock.withLock { routes[path] = (status, Data(json.utf8)) }
+  }
+
+  static func respond(port: Int, path: String, status: Int = 200, json: String) {
+    lock.withLock { portRoutes["\(port):\(path)"] = (status, Data(json.utf8)) }
   }
 
   static var captured: [(path: String, method: String, body: Data?)] {
@@ -31,6 +39,9 @@ private final class TranscriptEngineURLStub: URLProtocol, @unchecked Sendable {
     let body = Self.bodyData(from: request)
     let route = Self.lock.withLock { () -> (Int, Data)? in
       Self.requests.append((path, request.httpMethod ?? "GET", body))
+      if let port = url.port, let specific = Self.portRoutes["\(port):\(path)"] {
+        return specific
+      }
       return Self.routes[path]
     }
 
@@ -277,6 +288,89 @@ final class TranscriptEngineClientTests: XCTestCase {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [TranscriptEngineURLStub.self]
     return URLSession(configuration: configuration)
+  }
+}
+
+/// Discovery: a running engine must be found even when its port moved, and its
+/// address adopted so every synchronous reader follows it.
+final class TranscriptEngineDiscoveryTests: XCTestCase {
+  private let baseURLKey = TranscriptEngineClient.baseURLDefaultsKey
+  private var previousBaseURL: String?
+
+  override func setUp() {
+    super.setUp()
+    TranscriptEngineURLStub.reset()
+    TranscriptEngineDiscovery.resetCacheForTesting()
+    previousBaseURL = UserDefaults.standard.string(forKey: baseURLKey)
+  }
+
+  override func tearDown() {
+    if let previousBaseURL {
+      UserDefaults.standard.set(previousBaseURL, forKey: baseURLKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: baseURLKey)
+    }
+    TranscriptEngineDiscovery.resetCacheForTesting()
+    super.tearDown()
+  }
+
+  private func stubbedSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [TranscriptEngineURLStub.self]
+    return URLSession(configuration: configuration)
+  }
+
+  func testTheConfiguredAddressIsUsedWhenItAnswers() async throws {
+    UserDefaults.standard.set("http://127.0.0.1:8765", forKey: baseURLKey)
+    TranscriptEngineURLStub.respond(
+      port: 8765, path: "/v1/models",
+      json:
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed"}]}"#
+    )
+
+    let outcome = await TranscriptEngineDiscovery.resolve(session: stubbedSession())
+    guard case .resolved(let resolution) = outcome else {
+      return XCTFail("the configured engine must be found: \(outcome)")
+    }
+    XCTAssertEqual(resolution.url.absoluteString, "http://127.0.0.1:8765")
+    XCTAssertFalse(resolution.movedFromConfiguredAddress)
+    XCTAssertEqual(resolution.activeModelID, "whisper-turbo")
+  }
+
+  func testAMovedEngineOnTheNextPortIsFoundAndAdopted() async throws {
+    UserDefaults.standard.set("http://127.0.0.1:8765", forKey: baseURLKey)
+    // Nothing answers on the configured port; the same engine registry answers
+    // one port over, which is exactly what a restarted local engine looks like.
+    TranscriptEngineURLStub.respond(
+      port: 8766, path: "/v1/models",
+      json:
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed"}]}"#
+    )
+
+    let outcome = await TranscriptEngineDiscovery.resolve(session: stubbedSession())
+    guard case .resolved(let resolution) = outcome else {
+      return XCTFail("a running engine one port over must be found: \(outcome)")
+    }
+    XCTAssertEqual(resolution.url.absoluteString, "http://127.0.0.1:8766")
+    XCTAssertTrue(resolution.movedFromConfiguredAddress)
+
+    TranscriptEngineDiscovery.adopt(resolution)
+    XCTAssertEqual(
+      UserDefaults.standard.string(forKey: baseURLKey), "http://127.0.0.1:8766",
+      "every synchronous reader must follow the engine that actually answered")
+  }
+
+  func testNothingListeningNamesEveryAddressItTried() async {
+    UserDefaults.standard.set("http://127.0.0.1:8765", forKey: baseURLKey)
+
+    let outcome = await TranscriptEngineDiscovery.resolve(session: stubbedSession())
+    guard case .notRunning(let tried) = outcome else {
+      return XCTFail("no engine answered, so nothing may resolve: \(outcome)")
+    }
+    XCTAssertEqual(
+      tried.map(\.absoluteString),
+      ["http://127.0.0.1:8765", "http://127.0.0.1:8766", "http://127.0.0.1:8767"],
+      "the status must name where it looked")
   }
 }
 

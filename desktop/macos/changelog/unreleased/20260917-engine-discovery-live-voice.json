@@ -1,0 +1,3 @@
+{
+  "change": "The app now finds your Transcript Engine when its port changes (it checks 8765-8767, adopts the address, and says where it found it), and Voice Live has its own voice picker — the spoken voice you actually hear — while the TTS picker is clearly the fallback for text-only replies"
+}
