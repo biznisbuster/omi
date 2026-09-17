@@ -1839,7 +1839,12 @@ enum FloatingBarAnswerFailureCopy {
 
   /// Retired wording. Kept because a transcript written by an older build can
   /// still hold it, and because staying silent on it costs one string.
-  static let retired = ["Failed to get a response. Please try again."]
+  static let retired = [
+    "Failed to get a response. Please try again.",
+    // The window used to *speak* this notice through the selected voice when a
+    // voice dispatch produced no answer; a notice must never be read aloud.
+    "I couldn't get a response. Please try again.",
+  ]
 
   private static let unspoken: Set<String> = Set(
     ([emptyResponse] + retired).map { $0.lowercased() })

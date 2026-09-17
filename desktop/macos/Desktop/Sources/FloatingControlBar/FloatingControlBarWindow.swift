@@ -5836,9 +5836,17 @@ class FloatingControlBarManager {
         appendJournalSaveWarning(in: barWindow, provider: provider)
       }
     } else if let errorText = provider.displayErrorMessage, !errorText.isEmpty {
-      FloatingBarVoicePlaybackService.shared.speakOneShot(errorText)
+      // Never read a failure notice aloud. The voice lane's rule (and the
+      // answer-failure-copy type) is that a notice is shown, not spoken: users
+      // heard a diagnostic sentence in their chosen voice as if it were the
+      // answer. The provider's failure card carries the text.
+      log(
+        "FloatingControlBarWindow: voice turn \(voiceTurnID) produced no answer; display error: \(errorText.prefix(200))"
+      )
     } else {
-      FloatingBarVoicePlaybackService.shared.speakOneShot("I couldn't get a response. Please try again.")
+      log(
+        "FloatingControlBarWindow: voice turn \(voiceTurnID) produced no answer and no error text; clientTurnId=\(clientTurnId) messages=\(provider.messages.count)"
+      )
     }
 
     chatCancellable?.cancel()

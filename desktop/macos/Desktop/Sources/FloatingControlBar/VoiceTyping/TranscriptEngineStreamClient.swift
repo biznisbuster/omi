@@ -224,7 +224,10 @@ actor TranscriptEngineStreamClient {
     return TranscriptEngineClient.Result(
       transcript: trimmed,
       provider: "transcript-engine",
-      model: await TranscriptEngineClient.configured.activeModelName())
+      // Same client the caller configured: the model name must come from this
+      // engine, not from a second client pointed at the default address (which
+      // also made the test depend on a live server).
+      model: await TranscriptEngineClient(baseURL: baseURL, session: session).activeModelName())
   }
 
   /// Best-effort release of an abandoned take. Never throws.

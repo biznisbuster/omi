@@ -1,0 +1,3 @@
+{
+  "change": "A failed voice turn no longer reads its error notice aloud in your chosen voice — the notice is shown in the bar as text, and the failure is now logged with enough context to diagnose it"
+}
