@@ -162,4 +162,170 @@ final class TranscriptEngineClientTests: XCTestCase {
     let dataSize = wav[40..<44].withUnsafeBytes { $0.load(as: UInt32.self) }
     XCTAssertEqual(UInt32(littleEndian: dataSize), UInt32(pcm.count))
   }
+
+  // MARK: - Progressive (streaming) lane
+
+  func testStreamedTurnUploadsTheHeaderChunkThenReadsTheTranscript() async throws {
+    TranscriptEngineURLStub.respond(
+      path: "/v1/transcriptions/stream",
+      json: #"{"session_id":"sess-1","next_sequence":0}"#)
+    TranscriptEngineURLStub.respond(
+      path: "/v1/transcriptions/stream/sess-1/chunks/0",
+      json: #"{"session_id":"sess-1","sequence":0,"next_sequence":1,"committed_bytes":8192,"duplicate":false}"#)
+    TranscriptEngineURLStub.respond(
+      path: "/v1/transcriptions/stream/sess-1/chunks/1",
+      json: #"{"session_id":"sess-1","sequence":1,"next_sequence":2,"committed_bytes":20044,"duplicate":false}"#)
+    TranscriptEngineURLStub.respond(
+      path: "/v1/transcriptions/stream/sess-1/finish",
+      json: #"{"job_id":"job-9","transcription_id":"tr-9"}"#)
+    TranscriptEngineURLStub.respond(path: "/v1/jobs/job-9", json: #"{"state":"succeeded"}"#)
+    TranscriptEngineURLStub.respond(
+      path: "/v1/transcriptions/tr-9", json: #"{"text":"  Zdravo iz stream-a  "}"#)
+    TranscriptEngineURLStub.respond(
+      path: "/v1/models",
+      json: #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true}]}"#)
+
+    let stream = TranscriptEngineStreamClient(
+      baseURL: URL(string: "http://127.0.0.1:8765")!,
+      session: stubbedSession())
+    try await stream.start(language: "sr")
+    // Enough audio for two chunks: the header chunk plus the continuing PCM tail.
+    await stream.append(pcm16k: Data(repeating: 3, count: 60_000))
+    let result = try await stream.finishAndRead()
+
+    XCTAssertEqual(result.transcript, "Zdravo iz stream-a")
+    XCTAssertEqual(result.provider, "transcript-engine")
+    XCTAssertEqual(result.model, "whisper-turbo")
+
+    let create = try XCTUnwrap(
+      TranscriptEngineURLStub.captured.first { $0.path == "/v1/transcriptions/stream" })
+    XCTAssertEqual(create.method, "POST")
+    XCTAssertTrue(
+      String(decoding: try XCTUnwrap(create.body), as: UTF8.self).contains("\"language\":\"sr\""))
+
+    let chunk0 = try XCTUnwrap(
+      TranscriptEngineURLStub.captured.first {
+        $0.path == "/v1/transcriptions/stream/sess-1/chunks/0"
+      })
+    XCTAssertEqual(chunk0.method, "PUT")
+    let firstBody = try XCTUnwrap(chunk0.body)
+    XCTAssertEqual(
+      String(decoding: firstBody.prefix(4), as: UTF8.self), "RIFF",
+      "the engine can only demux a real audio file, so chunk 0 must carry the WAV header")
+    let riffSize = firstBody[4..<8].withUnsafeBytes { $0.load(as: UInt32.self) }
+    XCTAssertEqual(
+      UInt32(littleEndian: riffSize), UInt32.max,
+      "a take whose final length is unknown uses the streaming placeholder")
+
+    let chunk1 = try XCTUnwrap(
+      TranscriptEngineURLStub.captured.first {
+        $0.path == "/v1/transcriptions/stream/sess-1/chunks/1"
+      })
+    XCTAssertNotEqual(
+      String(decoding: try XCTUnwrap(chunk1.body).prefix(4), as: UTF8.self), "RIFF",
+      "later chunks are the continuing PCM range, not a second WAV file")
+
+    XCTAssertTrue(
+      TranscriptEngineURLStub.captured.contains {
+        $0.path == "/v1/transcriptions/stream/sess-1/finish" && $0.method == "POST"
+      })
+  }
+
+  func testStreamedTurnReadsTheLivePartialTextWhileOpen() async throws {
+    TranscriptEngineURLStub.respond(
+      path: "/v1/transcriptions/stream",
+      json: #"{"session_id":"sess-2","next_sequence":0}"#)
+    TranscriptEngineURLStub.respond(
+      path: "/v1/transcriptions/stream/sess-2/partial",
+      json: #"{"partial_generation":3,"text":"Zdravo","tail_text":"Marko kako"}"#)
+
+    let stream = TranscriptEngineStreamClient(
+      baseURL: URL(string: "http://127.0.0.1:8765")!,
+      session: stubbedSession())
+    try await stream.start(language: "sr")
+
+    let partial = await stream.partialText()
+    XCTAssertEqual(partial, "Zdravo Marko kako")
+  }
+
+  func testStreamStartFailureStopsBufferingAndSurfacesTheEngineError() async {
+    // No stub for /v1/transcriptions/stream: the session create answers 404.
+    let stream = TranscriptEngineStreamClient(
+      baseURL: URL(string: "http://127.0.0.1:8765")!,
+      session: stubbedSession())
+    do {
+      try await stream.start(language: "sr")
+      XCTFail("an unreachable engine must fail the session create")
+    } catch is TranscriptEngineClient.Failure {
+      // expected
+    } catch {
+      XCTFail("unexpected error: \(error)")
+    }
+
+    await stream.append(pcm16k: Data(repeating: 1, count: 20_000))
+    do {
+      _ = try await stream.finishAndRead()
+      XCTFail("a stream that never opened must not read as a transcript")
+    } catch is TranscriptEngineClient.Failure {
+      // expected
+    } catch {
+      XCTFail("unexpected error: \(error)")
+    }
+  }
+
+  private func stubbedSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [TranscriptEngineURLStub.self]
+    return URLSession(configuration: configuration)
+  }
+}
+
+/// The streaming lane's byte policy: chunk 0 carries the header and a small
+/// first slice so the engine can start early; later chunks are one second each
+/// and never re-order or drop audio.
+final class TranscriptEngineStreamChunkerTests: XCTestCase {
+  func testFirstChunkWaitsForItsSmallFloorAndCarriesTheStreamingHeader() {
+    var chunker = TranscriptEngineStreamClient.Chunker()
+    chunker.append(Data(repeating: 1, count: 1000))
+    XCTAssertNil(
+      chunker.takeChunk(),
+      "a first chunk that carries the header should wait for ~0.25 s of audio")
+
+    chunker.append(Data(repeating: 2, count: 8000))
+    let chunk = chunker.takeChunk()
+    let data = try? XCTUnwrap(chunk)
+    XCTAssertEqual(data?.count, 44 + 9000)
+    XCTAssertEqual(String(decoding: (data ?? Data())[0..<4], as: UTF8.self), "RIFF")
+  }
+
+  func testChunksKeepByteOrderAndStayBounded() {
+    var chunker = TranscriptEngineStreamClient.Chunker()
+    let pcm = Data((0..<100_000).map { UInt8($0 % 251) })
+    chunker.append(pcm)
+
+    let first = chunker.takeChunk()
+    let second = chunker.takeChunk()
+    let third = chunker.takeChunk()
+    let fourth = chunker.takeChunk()
+    XCTAssertEqual(first?.count, 44 + 32_000)
+    XCTAssertEqual(second?.count, 32_000)
+    XCTAssertEqual(third?.count, 32_000)
+    XCTAssertEqual(fourth?.count, 4_000)
+    XCTAssertNil(chunker.takeChunk())
+
+    var reassembled = Data()
+    for chunk in [first, second, third, fourth].compactMap({ $0 }) {
+      reassembled.append(chunk)
+    }
+    reassembled.removeFirst(44)
+    XCTAssertEqual(reassembled, pcm, "every byte must reach the engine exactly once")
+  }
+
+  func testFinishingFlushesAShortFirstChunkInsteadOfDroppingIt() {
+    var chunker = TranscriptEngineStreamClient.Chunker()
+    chunker.append(Data(repeating: 9, count: 200))
+    XCTAssertNil(chunker.takeChunk())
+    let flushed = chunker.takeChunk(isFinishing: true)
+    XCTAssertEqual(flushed?.count, 44 + 200)
+  }
 }

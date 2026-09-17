@@ -171,7 +171,7 @@ struct TranscriptEngineClient: Sendable {
 
   /// Best-effort human name of the engine's active recognizer, for the
   /// per-message caption. Never blocks a transcript on its own failure.
-  private func activeModelName() async -> String? {
+  func activeModelName() async -> String? {
     var request = URLRequest(url: baseURL.appendingPathComponent("v1/models"))
     request.timeoutInterval = 3
     guard let data = try? await session.data(for: request).0,
@@ -208,29 +208,6 @@ struct TranscriptEngineClient: Sendable {
   /// Wraps raw 16 kHz mono signed-16-bit PCM in a WAV container; the engine's
   /// normalization expects a real audio file, not a bare byte stream.
   static func wav(pcm16k: Data) -> Data {
-    let sampleRate: UInt32 = 16_000
-    let channels: UInt16 = 1
-    let bitsPerSample: UInt16 = 16
-    let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)
-    let blockAlign = channels * (bitsPerSample / 8)
-    var out = Data(capacity: 44 + pcm16k.count)
-    func append<T: FixedWidthInteger>(_ value: T) {
-      withUnsafeBytes(of: value.littleEndian) { out.append(contentsOf: $0) }
-    }
-    out.append(Data("RIFF".utf8))
-    append(UInt32(36 + pcm16k.count))
-    out.append(Data("WAVE".utf8))
-    out.append(Data("fmt ".utf8))
-    append(UInt32(16))
-    append(UInt16(1))  // PCM
-    append(channels)
-    append(sampleRate)
-    append(byteRate)
-    append(blockAlign)
-    append(bitsPerSample)
-    out.append(Data("data".utf8))
-    append(UInt32(pcm16k.count))
-    out.append(pcm16k)
-    return out
+    WAVContainer.pcm16(pcm: pcm16k, sampleRate: 16_000)
   }
 }
