@@ -21,6 +21,9 @@ enum TranscriptEngineDiscovery {
     /// True when the configured address did not answer and a neighbour did.
     let movedFromConfiguredAddress: Bool
     let activeModelID: String?
+    /// The active model answers MODEL_AVAILABLE. False means the engine runs
+    /// but cannot accept work until its model loads (MODEL_RESTART_REQUIRED).
+    let modelAvailable: Bool
   }
 
   enum Outcome: Equatable {
@@ -60,12 +63,32 @@ enum TranscriptEngineDiscovery {
       }
     }
 
+    // Several engine instances can be up at once (one per dev worktree). A
+    // healthy one wins over one whose worker has not loaded its model: the
+    // difference between "transcribes" and "refuses every request with 503".
+    var fallback: (index: Int, url: URL, registry: TranscriptEngineModelCatalog.Registry)?
     for (index, url) in candidates.enumerated() {
       guard let registry = await probe(url: url, session: session) else { continue }
+      let healthy = registry.entries.contains {
+        $0.active && $0.availabilityCode == "MODEL_AVAILABLE"
+      }
+      if healthy {
+        let resolution = Resolution(
+          url: url,
+          movedFromConfiguredAddress: index > 0,
+          activeModelID: registry.activeModelID,
+          modelAvailable: true)
+        store(.resolved(resolution))
+        return .resolved(resolution)
+      }
+      if fallback == nil { fallback = (index, url, registry) }
+    }
+    if let fallback {
       let resolution = Resolution(
-        url: url,
-        movedFromConfiguredAddress: index > 0,
-        activeModelID: registry.activeModelID)
+        url: fallback.url,
+        movedFromConfiguredAddress: fallback.index > 0,
+        activeModelID: fallback.registry.activeModelID,
+        modelAvailable: false)
       store(.resolved(resolution))
       return .resolved(resolution)
     }

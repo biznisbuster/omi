@@ -210,7 +210,7 @@ final class TranscriptEngineDiscoveryTests: XCTestCase {
     TranscriptEngineURLStub.respond(
       port: 8765, path: "/v1/models",
       json:
-        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed"}]}"#
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed","availability_code":"MODEL_AVAILABLE"}]}"#
     )
 
     let outcome = await TranscriptEngineDiscovery.resolve(session: stubbedSession())
@@ -220,6 +220,54 @@ final class TranscriptEngineDiscoveryTests: XCTestCase {
     XCTAssertEqual(resolution.url.absoluteString, "http://127.0.0.1:8765")
     XCTAssertFalse(resolution.movedFromConfiguredAddress)
     XCTAssertEqual(resolution.activeModelID, "whisper-turbo")
+    XCTAssertTrue(resolution.modelAvailable)
+  }
+
+  func testAHealthyNeighbourBeatsAConfiguredEngineWhoseModelNeverLoaded() async throws {
+    UserDefaults.standard.set("http://127.0.0.1:8765", forKey: baseURLKey)
+    // The configured instance runs but its worker never loaded the model — the
+    // state a dev worktree restart leaves behind, and every request it serves
+    // is a 503. The healthy instance one port over must win.
+    TranscriptEngineURLStub.respond(
+      port: 8765, path: "/v1/models",
+      json:
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"unavailable","content_state":"installed","availability_code":"MODEL_RESTART_REQUIRED"}]}"#
+    )
+    TranscriptEngineURLStub.respond(
+      port: 8766, path: "/v1/models",
+      json:
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed","availability_code":"MODEL_AVAILABLE"}]}"#
+    )
+
+    let outcome = await TranscriptEngineDiscovery.resolve(session: stubbedSession())
+    guard case .resolved(let resolution) = outcome else {
+      return XCTFail("a healthy engine must be found: \(outcome)")
+    }
+    XCTAssertEqual(resolution.url.absoluteString, "http://127.0.0.1:8766")
+    XCTAssertTrue(resolution.modelAvailable)
+
+    TranscriptEngineDiscovery.adopt(resolution)
+    XCTAssertEqual(
+      UserDefaults.standard.string(forKey: baseURLKey), "http://127.0.0.1:8766",
+      "the configured address must follow the instance that can actually transcribe")
+  }
+
+  func testAnUnloadedEngineIsStillReportedWithItsOwnState() async throws {
+    UserDefaults.standard.set("http://127.0.0.1:8765", forKey: baseURLKey)
+    TranscriptEngineURLStub.respond(
+      port: 8765, path: "/v1/models",
+      json:
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"unavailable","content_state":"installed","availability_code":"MODEL_RESTART_REQUIRED"}]}"#
+    )
+
+    let outcome = await TranscriptEngineDiscovery.resolve(session: stubbedSession())
+    guard case .resolved(let resolution) = outcome else {
+      return XCTFail("a running engine is found even before its model loads: \(outcome)")
+    }
+    XCTAssertEqual(resolution.url.absoluteString, "http://127.0.0.1:8765")
+    XCTAssertFalse(
+      resolution.modelAvailable,
+      "the UI must say the model needs a restart instead of claiming it is ready")
   }
 
   func testAMovedEngineOnTheNextPortIsFoundAndAdopted() async throws {
@@ -229,7 +277,7 @@ final class TranscriptEngineDiscoveryTests: XCTestCase {
     TranscriptEngineURLStub.respond(
       port: 8766, path: "/v1/models",
       json:
-        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed"}]}"#
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed","availability_code":"MODEL_AVAILABLE"}]}"#
     )
 
     let outcome = await TranscriptEngineDiscovery.resolve(session: stubbedSession())

@@ -781,10 +781,14 @@ private struct TranscriptEngineModelChooser: View {
                 .foregroundColor(Ink.secondary)
             }
             Spacer()
-            if entry.active {
+            if entry.active, entry.availabilityCode == "MODEL_AVAILABLE" {
               Text("Active")
                 .scaledFont(size: OmiType.caption, weight: .medium)
                 .foregroundColor(Ink.listeningGreen)
+            } else if entry.active {
+              // Selected but not loaded: the state line above already says a
+              // restart is required, so no green "Active" may contradict it.
+              EmptyView()
             } else {
               Button("Use") {
                 Task { await catalog.activate(entry.id) }
@@ -814,7 +818,11 @@ private struct TranscriptEngineModelChooser: View {
     case .resolved(let resolution):
       TranscriptEngineDiscovery.adopt(resolution)
       discoveryFound = true
-      if resolution.movedFromConfiguredAddress {
+      if !resolution.modelAvailable {
+        let model = resolution.activeModelID ?? "its model"
+        discoveryNote =
+          "The engine is running at \(resolution.url.absoluteString), but \(model) is not loaded yet (MODEL_RESTART_REQUIRED). Restart the engine from your Transcript Companion to apply it."
+      } else if resolution.movedFromConfiguredAddress {
         let model = resolution.activeModelID.map { " · \($0)" } ?? ""
         discoveryNote =
           "Engine found at \(resolution.url.absoluteString)\(model) — the address was updated."
