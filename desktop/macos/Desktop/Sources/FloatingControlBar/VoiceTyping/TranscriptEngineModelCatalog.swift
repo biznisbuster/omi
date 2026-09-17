@@ -16,9 +16,18 @@ final class TranscriptEngineModelCatalog: ObservableObject {
     let available: Bool
     let loadState: String
     let contentState: String
+    let availabilityCode: String
 
     var stateLabel: String {
-      if active { return "Active" }
+      // The engine distinguishes "selected" from "loaded": a selection that
+      // still needs the runtime restart reports MODEL_RESTART_REQUIRED, and
+      // calling that "Active" hid exactly the state a user must act on.
+      if active {
+        if availabilityCode == "MODEL_RESTART_REQUIRED" || loadState == "unavailable" {
+          return "Selected — restart the engine to load it"
+        }
+        return "Active"
+      }
       if available { return "Loaded" }
       switch contentState {
       case "installed":
@@ -149,7 +158,8 @@ final class TranscriptEngineModelCatalog: ObservableObject {
         active: (raw["active"] as? Bool) == true,
         available: (raw["available"] as? Bool) == true,
         loadState: raw["load_state"] as? String ?? "",
-        contentState: raw["content_state"] as? String ?? "")
+        contentState: raw["content_state"] as? String ?? "",
+        availabilityCode: raw["availability_code"] as? String ?? "")
     }
     guard !entries.isEmpty else { return nil }
     let activeID = entries.first(where: \.active)?.id

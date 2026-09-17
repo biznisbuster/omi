@@ -149,6 +149,11 @@ actor TranscriptEngineStreamClient {
 
     do {
       let (data, response) = try await self.session.data(for: request)
+      if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode),
+        let engineError = TranscriptEngineClient.Failure.engineError(from: data)
+      {
+        throw engineError
+      }
       guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
         throw TranscriptEngineClient.Failure.unavailable
       }
@@ -208,6 +213,11 @@ actor TranscriptEngineStreamClient {
     request.httpBody = try? JSONSerialization.data(withJSONObject: ["language": language])
 
     let (data, response) = try await session.data(for: request)
+    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode),
+      let engineError = TranscriptEngineClient.Failure.engineError(from: data)
+    {
+      throw engineError
+    }
     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
       let finished = try? JSONDecoder().decode(FinishResponse.self, from: data)
     else { throw failure ?? TranscriptEngineClient.Failure.malformedResponse }
@@ -297,14 +307,16 @@ actor TranscriptEngineStreamClient {
     request.timeoutInterval = 10
     request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
     request.httpBody = chunk
-    let (_, response) = try await session.data(for: request)
+    let (data, response) = try await session.data(for: request)
     guard let http = response as? HTTPURLResponse else {
       throw TranscriptEngineClient.Failure.unavailable
     }
-    // 4xx on a chunk means the session is gone (cancelled, expired, or a
-    // sequence conflict); stop honestly instead of hammering the engine.
+    // A refused chunk means the session cannot proceed (cancelled, expired, a
+    // sequence conflict, or the engine's model is unavailable); the engine's
+    // own code and message are the useful part, so they are kept verbatim.
     guard (200..<300).contains(http.statusCode) else {
-      throw TranscriptEngineClient.Failure.rejected(code: "chunk_\(http.statusCode)")
+      throw TranscriptEngineClient.Failure.engineError(from: data)
+        ?? TranscriptEngineClient.Failure.rejected(code: "chunk_\(http.statusCode)")
     }
     nextSequence = sequence + 1
   }

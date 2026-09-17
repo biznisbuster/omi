@@ -5844,8 +5844,13 @@ class FloatingControlBarManager {
         "FloatingControlBarWindow: voice turn \(voiceTurnID) produced no answer; display error: \(errorText.prefix(200))"
       )
     } else {
+      // Bounded identity diagnostics: which assistant rows exist, and under
+      // which clientTurnId, is exactly what a missed voice binding needs.
+      let recent = provider.messages.suffix(4).map { message in
+        "\(message.sender == .ai ? "ai" : "user"):\(message.clientTurnId ?? "-"):streaming=\(message.isStreaming):chars=\(message.text.count)"
+      }.joined(separator: " | ")
       log(
-        "FloatingControlBarWindow: voice turn \(voiceTurnID) produced no answer and no error text; clientTurnId=\(clientTurnId) messages=\(provider.messages.count)"
+        "FloatingControlBarWindow: voice turn \(voiceTurnID) produced no answer and no error text; clientTurnId=\(clientTurnId) messages=\(provider.messages.count) recent=[\(recent)]"
       )
     }
 

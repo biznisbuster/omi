@@ -19,12 +19,18 @@ struct TranscriptEngineClient: Sendable {
     let model: String?
   }
 
-  enum Failure: Error, Equatable, CustomStringConvertible {
+  enum Failure: Error, Equatable, CustomStringConvertible, LocalizedError {
     case unavailable
     case unsupportedLanguage(String)
     case rejected(code: String?)
     case timedOut
     case malformedResponse
+    /// The engine answered with its own error contract
+    /// (`{"error":{"code":…,"message":…}}`) — a refusal it explained, unlike
+    /// an unreachable server or an unreadable body. The code and message are
+    /// the engine's words and must reach the user, not be flattened into
+    /// "unexpected response".
+    case engineError(code: String, message: String)
 
     var description: String {
       switch self {
@@ -33,7 +39,28 @@ struct TranscriptEngineClient: Sendable {
       case .rejected(let code): return "transcript engine job failed (\(code ?? "unknown"))"
       case .timedOut: return "transcript engine timed out"
       case .malformedResponse: return "transcript engine returned an unexpected response"
+      case .engineError(let code, let message): return "\(code): \(message)"
       }
+    }
+
+    /// What the user sees. The engine's own refusal reads as itself.
+    var errorDescription: String? {
+      switch self {
+      case .engineError: return "Transcript Engine: \(description)"
+      default: return description
+      }
+    }
+
+    /// The engine's error contract, when the body carries it.
+    static func engineError(from data: Data) -> Failure? {
+      guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let error = payload["error"] as? [String: Any],
+        let code = (error["code"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !code.isEmpty
+      else { return nil }
+      let message =
+        (error["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return .engineError(code: code, message: message.isEmpty ? code : message)
     }
   }
 
@@ -127,7 +154,14 @@ struct TranscriptEngineClient: Sendable {
     append("\r\n--\(boundary)--\r\n")
     request.httpBody = body
 
-    guard let data = try? await session.data(for: request).0 else { throw Failure.unavailable }
+    guard let (data, response) = try? await session.data(for: request) else {
+      throw Failure.unavailable
+    }
+    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode),
+      let engineError = Failure.engineError(from: data)
+    {
+      throw engineError
+    }
     guard let created = try? JSONDecoder().decode(Created.self, from: data) else {
       throw Failure.malformedResponse
     }

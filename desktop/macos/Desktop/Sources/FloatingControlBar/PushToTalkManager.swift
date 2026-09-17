@@ -3689,15 +3689,34 @@ class PushToTalkManager: ObservableObject {
           provider: result.provider, model: result.model, language: language)
         return TranscriptionService.BatchTranscriptionResult(
           transcript: result.transcript, provider: result.provider, model: result.model)
+      } catch let failure as TranscriptEngineClient.Failure {
+        if case .unsupportedLanguage = failure {
+          // The engine honestly cannot decode this language (Serbian only);
+          // that is a scope limit, not an engine failure, so the built-in
+          // chain still serves the user.
+          log(
+            "PushToTalkManager: transcript engine does not support this language — using the built-in chain")
+        } else {
+          // Strict: the user pinned this engine, so a substitute recognizer
+          // would hide the engine's own refusal — observed live: a
+          // MODEL_NOT_AVAILABLE 503 was silently answered by Parakeet, which
+          // is not the recognizer the user chose. Fail the turn with the
+          // engine's words instead.
+          log(
+            "PushToTalkManager: transcript engine refused the turn (\(failure)) — failing the pinned turn")
+          DesktopDiagnosticsManager.shared.recordFallback(
+            area: "ptt_cascade",
+            from: "transcript_engine",
+            to: "none",
+            reason: "other",
+            outcome: .exhausted,
+            extra: [
+              "stt_provider": "transcript-engine", "stt_model": "unknown", "user_visible": true,
+            ])
+          throw failure
+        }
       } catch {
-        log("PushToTalkManager: transcript engine unavailable (\(error)) — using the built-in chain")
-        DesktopDiagnosticsManager.shared.recordFallback(
-          area: "ptt_cascade",
-          from: "transcript_engine",
-          to: "builtin_stt",
-          reason: "other",
-          outcome: .exhausted,
-          extra: ["stt_provider": "transcript-engine", "stt_model": "unknown", "user_visible": false])
+        throw error
       }
     }
     let localTranscript: String? =

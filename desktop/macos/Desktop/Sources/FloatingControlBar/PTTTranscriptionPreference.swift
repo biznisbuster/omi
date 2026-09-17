@@ -77,7 +77,8 @@ enum PTTTranscriptionPreference: String, CaseIterable, Sendable {
     case .onDevice: return "Private and offline; a failed decode fails the turn instead of going to the cloud"
     case .cloud: return "Omi's batch speech endpoint; usually more accurate for some languages"
     case .transcriptEngine:
-      return "Your own engine at 127.0.0.1:8765 (Serbian); falls back to the built-in chain when it is down"
+      return
+        "Your own engine (Serbian). If it cannot serve, the turn reports the engine's error — no substitute recognizer"
     }
   }
 }
