@@ -4,24 +4,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
-/// Users often paste one key and miss the banner saying a valid LLM key is
-/// required. Non-nil while 1–3 keys (in `BYOKProvider.allCases` order)
-/// are entered, listing the ones still missing.
-func byokMissingKeysHint(_ keys: [String]) -> String? {
-  let missing = zip(BYOKProvider.allCases, keys).filter { $0.1.isEmpty }.map(\.0.displayName)
-  guard !missing.isEmpty, missing.count < keys.count else { return nil }
-  return
-    "Still missing: \(missing.joined(separator: ", ")). All 4 keys must be entered at the same time to activate the free plan."
-}
-
 /// What a settled BYOK key set owes the backend.
 ///
-/// The four fields are `SecureField`s bound straight to `@AppStorage`, so the
+/// The key fields are `SecureField`s bound straight to `@AppStorage`, so the
 /// binding is written on *every character*. Reconciling on each of those writes
-/// pinged four provider auth endpoints with a half-typed key and flapped the
-/// backend free-plan flag once per keystroke. Deciding the action from the
-/// settled key set — separately from performing it — is what makes that policy
-/// testable without a network.
+/// pinged provider auth endpoints with a half-typed key and flapped the backend
+/// free-plan flag once per keystroke. Deciding the action from the settled key
+/// set — separately from performing it — is what makes that policy testable
+/// without a network.
 enum BYOKReconciliation {
   enum Action: Equatable {
     /// Every key is present: prove them against the providers, then flip the

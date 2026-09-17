@@ -14,8 +14,7 @@ import Foundation
 //
 // Production note: for "all Auto users to agree", the canonical pick should come
 // from a backend cron writing one value all clients read. This client-side daily
-// fetch is the same formula and a safe fallback when that endpoint is absent;
-// `applyServerPick(_:)` lets the backend override.
+// fetch is the same formula and a safe fallback when that endpoint is absent.
 
 @MainActor
 final class AutoModelSelector {
@@ -42,11 +41,6 @@ final class AutoModelSelector {
       return
     }
     Task { await refresh() }
-  }
-
-  /// Lets a backend-provided pick win over the local computation.
-  func applyServerPick(_ provider: RealtimeOmniProvider) {
-    store(provider)
   }
 
   /// Read the daily pick from the omi backend (which runs the Artificial

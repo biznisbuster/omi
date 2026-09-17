@@ -271,47 +271,6 @@ struct ShortcutsSettingsSection: View {
         settingId: "floatingbar.muteaudio", highlightedSettingId: $highlightedSettingId))
   }
 
-  private var referenceCard: some View {
-    VStack(alignment: .leading, spacing: OmiSpacing.md) {
-      Text("Keyboard Shortcuts")
-        .scaledFont(size: OmiType.subheading, weight: .semibold)
-        .foregroundColor(Ink.primary)
-
-      shortcutRow(
-        label: "Open Omi",
-        keys: settings.askOmiEnabled ? settings.askOmiShortcut.displayLabel : "Disabled")
-      shortcutRow(label: "Toggle floating bar", keys: "\u{2318}\\")
-      shortcutRow(
-        label: "Push to talk",
-        keys: settings.pttEnabled ? settings.pttShortcut.displayLabel + " hold" : "Disabled")
-      if settings.pttEnabled && settings.doubleTapForLock {
-        shortcutRow(
-          label: "Locked listening", keys: settings.pttShortcut.displayLabel + " \u{00D7}2")
-      }
-    }
-    .padding(OmiSpacing.xl)
-    .background(
-      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
-        .fill(Ink.rowFill)
-    )
-  }
-
-  private func shortcutRow(label: String, keys: String) -> some View {
-    HStack {
-      Text(label)
-        .scaledFont(size: OmiType.body)
-        .foregroundColor(Ink.secondary)
-      Spacer()
-      Text(keys)
-        .scaledMonospacedFont(size: 14, weight: .medium)
-        .foregroundColor(Ink.primary)
-        .padding(.horizontal, OmiSpacing.sm)
-        .padding(.vertical, OmiSpacing.xxs)
-        .background(Ink.rowFill)
-        .cornerRadius(SettingsGlassMetrics.pillRadius)
-    }
-  }
-
   private func customShortcutButton(for target: ShortcutTarget, isSelected: Bool) -> some View {
     Button {
       switch target {

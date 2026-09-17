@@ -69,27 +69,15 @@ final class RealtimeOmniSettings {
   static let shared = RealtimeOmniSettings()
 
   private let providerKey = "realtimeOmniProvider"
-  /// Master switch: when off, the floating bar keeps using the legacy
-  /// Deepgram STT + OpenAI/system TTS cascade. Lets us ship behind a flag.
-  private let enabledKey = "realtimeOmniEnabled"
 
   private init() {
     UserDefaults.standard.register(defaults: [
       // Default to Auto: AutoModelSelector picks the best provider (currently Gemini),
       // and the hub fails over to the other realtime model (GPT Realtime), then the
       // Claude cascade, if it can't connect. The user can pin a provider in
-      // Advanced → Voice Model. This default also drives the realtime hub provider.
-      providerKey: RealtimeOmniProvider.auto.rawValue,
-      enabledKey: false,
+      // Settings → Voice & Models. This default also drives the realtime hub provider.
+      providerKey: RealtimeOmniProvider.auto.rawValue
     ])
-  }
-
-  var isEnabled: Bool {
-    get { UserDefaults.standard.bool(forKey: enabledKey) }
-    set {
-      UserDefaults.standard.set(newValue, forKey: enabledKey)
-      NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
-    }
   }
 
   /// The provider as configured by the user (may be `.auto`).

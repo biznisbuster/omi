@@ -527,8 +527,8 @@ extension SettingsContentView {
               .foregroundColor(Ink.primary)
             Text(
               APIKeyService.isByokActive
-                ? "You're using your own OpenAI, Anthropic, Gemini, and Deepgram keys. No subscription."
-                : "Provide your own OpenAI, Anthropic, Gemini, and Deepgram keys to skip the subscription entirely."
+                ? "You're using your own language-model key. No subscription."
+                : "Add a language-model key (OpenRouter, OpenAI, Gemini, Anthropic, or OpenCode Go) to skip the subscription entirely."
             )
             .scaledFont(size: OmiType.caption)
             .foregroundColor(Ink.secondary)
