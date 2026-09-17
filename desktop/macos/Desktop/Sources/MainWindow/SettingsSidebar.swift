@@ -28,10 +28,6 @@ struct SettingsSearchItem: Identifiable {
       icon: "gearshape",
       settingId: "general.notifications"),
     SettingsSearchItem(
-      name: "Ask omi", subtitle: "Show or hide the floating chat bar",
-      keywords: ["floating bar", "chat bar"], section: .general, icon: "gearshape",
-      settingId: "general.askomi"),
-    SettingsSearchItem(
       name: "Interface Sounds", subtitle: "Sounds for important arrivals and completions",
       keywords: ["sound", "sounds", "audio", "chime", "mute", "silence", "effects"],
       section: .general, icon: "speaker.wave.2", settingId: "general.interfacesounds"),
@@ -49,10 +45,6 @@ struct SettingsSearchItem: Identifiable {
       section: .general, icon: "circle.lefthalf.filled", settingId: "general.transparency"),
 
     // Rewind
-    SettingsSearchItem(
-      name: "Rewind", subtitle: "Browse your screen history",
-      keywords: ["screen history", "screenshots", "recording"], section: .rewind,
-      icon: "clock.arrow.circlepath", settingId: "rewind.rewind"),
     SettingsSearchItem(
       name: "Screen Capture", subtitle: "Toggle screen capture on or off",
       keywords: ["screen capture", "screenshot", "monitor", "recording", "rewind"],
@@ -120,6 +112,48 @@ struct SettingsSearchItem: Identifiable {
       keywords: ["dictation", "wispr", "superwhisper", "noise", "mute", "conversations"],
       section: .transcription,
       icon: "mic.slash", settingId: "transcription.ignoredictationapps"),
+
+    // Voice & Models
+    SettingsSearchItem(
+      name: "Voice Answer Mode",
+      subtitle: "Voice Live answers in one model; Voice Transcript splits the roles",
+      keywords: ["live", "transcript", "voice mode", "realtime", "cascade", "answer"],
+      section: .voice, icon: "waveform.and.mic", settingId: "aichat.voicemode"),
+    SettingsSearchItem(
+      name: "Voice Model (Live)",
+      subtitle: "The realtime model that hears, thinks, and speaks in Live mode",
+      keywords: ["realtime", "gemini live", "gpt realtime", "live voice", "speech model"],
+      section: .voice, icon: "waveform", settingId: "aichat.realtimevoice"),
+    SettingsSearchItem(
+      name: "Transcription Model",
+      subtitle: "The recognizer that decodes voice in Transcript mode",
+      keywords: ["speech to text", "stt", "recognizer", "whisper", "parakeet", "transcript engine"],
+      section: .voice, icon: "waveform.badge.magnifyingglass", settingId: "transcription.sttengine"),
+    SettingsSearchItem(
+      name: "Dictation Model",
+      subtitle: "The recognizer Omi Type uses when you dictate into the focused app",
+      keywords: ["dictation", "voice typing", "omi type", "recognizer", "on-device"],
+      section: .voice, icon: "text.cursor", settingId: "voice.dictationmodel"),
+    SettingsSearchItem(
+      name: "Chat Model",
+      subtitle: "The provider that answers typed chat and Transcript-mode voice",
+      keywords: ["chat model", "provider", "byok", "opencode go", "opencodego", "openrouter", "managed"],
+      section: .voice, icon: "brain.head.profile", settingId: "voice.chatmodel"),
+    SettingsSearchItem(
+      name: "Spoken Voice",
+      subtitle: "The voice that reads answers aloud (and the Live-mode fallback)",
+      keywords: ["tts", "voice", "speak", "speech synthesis", "piper", "openai voice"],
+      section: .voice, icon: "speaker.wave.2", settingId: "floatingbar.voice"),
+    SettingsSearchItem(
+      name: "Background Agents",
+      subtitle: "Which agent CLI runs background work started from chat or voice",
+      keywords: ["agents", "hermes", "openclaw", "background", "spawn"],
+      section: .voice, icon: "person.2.badge.gearshape", settingId: "aichat.backgroundagents"),
+    SettingsSearchItem(
+      name: "Model Roles",
+      subtitle: "What runs in each voice, dictation, chat, and TTS role right now",
+      keywords: ["roles", "overview", "which model", "diagnostics"],
+      section: .voice, icon: "list.bullet.rectangle", settingId: "aichat.modelroles"),
 
     // Notifications
     SettingsSearchItem(
@@ -259,8 +293,10 @@ struct SettingsSearchItem: Identifiable {
       keywords: ["statistics", "conversations", "usage"], section: .advanced, icon: "chart.bar",
       settingId: "advanced.stats"),
     SettingsSearchItem(
-      name: "AI Provider", subtitle: "Choose between your omi account and Claude for desktop chat",
-      keywords: ["provider", "agent sdk", "claude code", "acp", "bridge mode"], section: .advanced,
+      name: "AI Provider",
+      subtitle: "Choose the agent runtime that answers desktop chat — Omi, Claude, Hermes, or OpenClaw",
+      keywords: ["provider", "agent sdk", "claude code", "hermes", "openclaw", "acp", "bridge mode"],
+      section: .advanced,
       icon: "cpu", settingId: "aichat.provider"),
     SettingsSearchItem(
       name: "Workspace", subtitle: "Set a project directory for desktop chat context",
@@ -317,7 +353,22 @@ struct SettingsSearchItem: Identifiable {
     SettingsSearchItem(
       name: "Voice Speed", subtitle: "Adjust the playback speed for voice replies",
       keywords: ["voice speed", "speech speed", "playback speed", "tts speed"],
-      section: .floatingBar, icon: "sparkles", settingId: "floatingbar.voicespeed"),
+      section: .voice, icon: "sparkles", settingId: "floatingbar.voicespeed"),
+    SettingsSearchItem(
+      name: "Ask Mode",
+      subtitle: "Show an Ask/Act toggle in chat so Act mode is opt-in",
+      keywords: ["ask", "act", "read-only", "chat mode", "permissions"],
+      section: .aiChat, icon: "bubble.left.and.bubble.right", settingId: "aichat.askmode"),
+    SettingsSearchItem(
+      name: "CLAUDE.md",
+      subtitle: "View the global and project CLAUDE.md the agent reads",
+      keywords: ["claude", "instructions", "memory file", "project"], section: .aiChat,
+      icon: "doc.text", settingId: "aichat.claudemd"),
+    SettingsSearchItem(
+      name: "Skills",
+      subtitle: "Enable or disable discovered agent skills",
+      keywords: ["skills", "skill", "agent capabilities"], section: .aiChat,
+      icon: "sparkles", settingId: "aichat.skills"),
     SettingsSearchItem(
       name: "Shortcuts", subtitle: "Configure Open Omi and push-to-talk keyboard shortcuts",
       keywords: ["shortcuts", "keyboard", "hotkeys", "push to talk"], section: .shortcuts,
@@ -398,6 +449,7 @@ enum SettingsSidebarRoutes {
     .general,
     .account,
     .transcription,
+    .voice,
     .rewind,
     .floatingBar,
     .notifications,
@@ -604,6 +656,7 @@ struct SettingsSidebarItem: View {
     case .general: return "gearshape"
     case .rewind: return "clock.arrow.circlepath"
     case .transcription: return "waveform"
+    case .voice: return "waveform.and.mic"
     case .notifications: return "bell"
     case .privacy: return "lock.shield"
     case .account: return "person.circle"
@@ -681,50 +734,6 @@ struct SettingsSidebarItem: View {
 }
 
 // MARK: - Settings Subsection Item
-struct SettingsSubsectionItem: View {
-  let subsection: SettingsContentView.AdvancedSubsection
-  let isSelected: Bool
-  let iconWidth: CGFloat
-  let onTap: () -> Void
-
-  @State private var isHovered = false
-
-  var body: some View {
-    Button(action: onTap) {
-      HStack(spacing: OmiSpacing.sm) {
-        // Indentation spacer
-        Spacer()
-          .frame(width: iconWidth + 12)
-
-        Image(systemName: subsection.icon)
-          .scaledFont(size: OmiType.body)
-          .foregroundColor(isSelected ? Ink.surface : Ink.secondary)
-          .frame(width: 16)
-
-        Text(subsection.rawValue)
-          .scaledFont(size: OmiType.body, weight: isSelected ? .medium : .regular)
-          .foregroundColor(isSelected ? Ink.surface : Ink.primary)
-
-        Spacer()
-      }
-      .padding(.horizontal, OmiSpacing.md)
-      .padding(.vertical, OmiSpacing.sm)
-      .contentShape(Rectangle())
-      .background(
-        RoundedRectangle(cornerRadius: SettingsGlassMetrics.controlRadius, style: .continuous)
-          .fill(
-            isSelected
-              ? AnyShapeStyle(Ink.accent)
-              : AnyShapeStyle(isHovered ? Ink.rowHover : Color.clear))
-      )
-    }
-    .buttonStyle(.plain)
-    .onHover { hovering in
-      isHovered = hovering
-    }
-    .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
-  }
-}
 
 // MARK: - Settings Search Result Row
 struct SettingsSearchResultRow: View {

@@ -5,43 +5,6 @@ import UniformTypeIdentifiers
 import WebKit
 
 extension SettingsContentView {
-  /// The recognizers the voice lanes actually try, in order, for the pinned
-  /// Speech-to-Text Engine. Live answers transcribe inside the voice model;
-  /// this is the transcript lane and dictation.
-  private var transcriptionChainDescription: String {
-    switch PTTTranscriptionPreference.current {
-    case .automatic:
-      return "Parakeet v3 (on-device) → Omi cloud batch"
-    case .onDevice:
-      return "Parakeet v3 (on-device) only"
-    case .cloud:
-      return "Omi cloud batch only"
-    case .transcriptEngine:
-      return "Transcript Engine (\(TranscriptEngineClient.configured.baseURL.absoluteString)) → built-in fallback"
-    }
-  }
-
-  /// One read-only role line: what runs, and where the control for it lives.
-  private func modelRoleRow(_ title: String, value: String, hint: String) -> some View {
-    VStack(alignment: .leading, spacing: OmiSpacing.hairline) {
-      Text(title)
-        .scaledFont(size: OmiType.caption, weight: .medium)
-        .foregroundColor(Ink.primary)
-      HStack(spacing: OmiSpacing.xs) {
-        Text(value)
-          .scaledFont(size: OmiType.caption)
-          .foregroundColor(Ink.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-        Text("· \(hint)")
-          .scaledFont(size: OmiType.micro)
-          .foregroundColor(Ink.secondary)
-          .lineLimit(1)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
   func advancedCategoryHeader(title: String, icon: String) -> some View {
     HStack(spacing: OmiSpacing.sm) {
       Image(systemName: icon)
@@ -190,205 +153,11 @@ extension SettingsContentView {
 
   // MARK: - Advanced Subsections
 
+  /// The AI & Automation pane owns the agent runtime (provider, workspace,
+  /// browser), not the voice model roles — those moved to Voice & Models,
+  /// where the answer mode decides which of them is in play.
   var aiSetupSubsection: some View {
     VStack(spacing: OmiSpacing.xl) {
-      settingsCard(settingId: "aichat.realtimevoice") {
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "waveform")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Voice Model")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            SettingsMenuPicker(selection: $realtimeOmniProvider) {
-              ForEach(RealtimeOmniProvider.userSelectable, id: \.rawValue) { p in
-                Text(p.displayName).tag(p.rawValue)
-              }
-            }
-            .onChange(of: realtimeOmniProvider) { _, newValue in
-              if newValue == RealtimeOmniProvider.auto.rawValue {
-                AutoModelSelector.shared.refreshIfStale()
-              }
-              // The picker writes @AppStorage directly (bypassing the RealtimeOmniSettings
-              // setter), so post the change ourselves — this is what re-warms the realtime
-              // hub on the newly selected provider (and is a no-op for unchanged providers).
-              NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
-            }
-          }
-
-          if let p = RealtimeOmniProvider(rawValue: realtimeOmniProvider), p != .auto {
-            Text(p.subtitle)
-              .scaledFont(size: OmiType.caption)
-              .foregroundColor(Ink.secondary)
-          }
-        }
-      }
-
-      settingsCard(settingId: "aichat.voicemode") {
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "waveform.and.mic")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Voice Answer Mode")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            SettingsMenuPicker(selection: $pttVoiceMode) {
-              ForEach(PTTVoiceMode.allCases, id: \.rawValue) { mode in
-                Text(mode.displayName).tag(mode.rawValue)
-              }
-            }
-            .accessibilityIdentifier("aichat.voice_answer_mode")
-          }
-
-          Text(
-            (PTTVoiceMode(rawValue: pttVoiceMode) ?? .live).subtitle
-          )
-          .scaledFont(size: OmiType.caption)
-          .foregroundColor(Ink.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-
-          if (PTTVoiceMode(rawValue: pttVoiceMode) ?? .live) == .transcript {
-            Text(
-              "Transcription uses the Speech-to-Text Engine (Settings → Transcription); the answer comes from your chat model."
-            )
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(Ink.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-          }
-        }
-      }
-
-      settingsCard(settingId: "aichat.backgroundagents") {
-        let selectableProviders = BackgroundAgentProvider.allCases.filter { $0 == .omiManaged || $0.isInstalled }
-        let selectedProvider =
-          BackgroundAgentProvider(rawValue: backgroundAgentProvider) ?? .omiManaged
-
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "person.2.badge.gearshape")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Background Agents")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            SettingsMenuPicker(selection: $backgroundAgentProvider) {
-              ForEach(selectableProviders, id: \.rawValue) { provider in
-                Text(provider.displayName).tag(provider.rawValue)
-              }
-            }
-            .accessibilityIdentifier("aichat.background_agent_provider")
-            .onChange(of: backgroundAgentProvider) { _, _ in
-              // The spawn tool schema is baked into the warm realtime session, so
-              // a changed pin must rebuild it — same handoff the Voice Model uses.
-              NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
-            }
-          }
-
-          Text(selectedProvider.subtitle)
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(Ink.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-
-          if selectedProvider != .omiManaged, !selectedProvider.isInstalled {
-            Text(
-              "\(selectedProvider.displayName) is not installed right now — agents fall back to the Omi lane until it is."
-            )
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(PageGlass.warning)
-            .fixedSize(horizontal: false, vertical: true)
-          }
-
-          if selectableProviders.count == 1 {
-            Text(
-              "No local agent CLI detected. Install Hermes or OpenClaw to run background agents without an Omi plan."
-            )
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(Ink.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-          }
-        }
-      }
-
-      settingsCard(settingId: "aichat.modelroles") {
-        let voiceModel = RealtimeOmniSettings.shared.selectedProvider
-        let voiceMode = PTTVoiceMode(rawValue: pttVoiceMode) ?? .live
-        let chatProvider = APIKeyService.selectedBYOKLLMProvider
-        let chatModel = AgentRuntimeProcess.configuredClientDirectModel()
-        let chatValue =
-          [chatProvider?.displayName, chatModel, chatProvider == nil ? "Omi managed" : nil]
-          .compactMap { $0 }
-          .joined(separator: " · ")
-        let voiceValue = ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID)
-
-        VStack(alignment: .leading, spacing: OmiSpacing.sm) {
-          HStack {
-            Image(systemName: "list.bullet.rectangle")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Model Roles")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-          }
-
-          Text(
-            "What runs in each role right now. Live voice is one speech model doing all three; Transcript mode splits them."
-          )
-          .scaledFont(size: OmiType.caption)
-          .foregroundColor(Ink.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-
-          modelRoleRow(
-            "Voice (Live): hears, thinks, speaks",
-            value: "\(voiceModel.displayName) · \(voiceModel.modelID)",
-            hint: "Settings → Voice Model")
-          modelRoleRow(
-            "Voice transcription",
-            value: voiceMode == .transcript
-              ? transcriptionChainDescription
-              : "inside the Live voice model",
-            hint: voiceMode == .transcript
-              ? "Settings → Transcription"
-              : "Settings → Voice Answer Mode (switch to Transcript for a separate engine)")
-          modelRoleRow(
-            "Dictation (voice typing)",
-            value: transcriptionChainDescription,
-            hint: "Settings → Transcription")
-          modelRoleRow(
-            "Voice answer in Transcript mode",
-            value: chatValue,
-            hint: "Developer Keys")
-          modelRoleRow(
-            "Typed chat & agent runtime",
-            value: chatValue,
-            hint: "Developer Keys")
-          modelRoleRow(
-            "Reading answers aloud (TTS)",
-            value: voiceValue.description,
-            hint: "Settings → Floating Bar")
-          modelRoleRow(
-            "Background agents",
-            value: (BackgroundAgentProvider(rawValue: backgroundAgentProvider) ?? .omiManaged).displayName,
-            hint: "this pane")
-        }
-      }
-
       settingsCard(settingId: "aichat.provider") {
         VStack(alignment: .leading, spacing: OmiSpacing.md) {
           HStack {
@@ -477,11 +246,15 @@ extension SettingsContentView {
               panel.message = "Select a project directory"
               if panel.runModal() == .OK, let url = panel.url {
                 aiChatWorkingDirectory = url.path
+                // `ChatProvider` holds its own `@AppStorage` wrapper over the same key, and a
+                // wrapper's `didSet` only fires for writes made through that wrapper — so the
+                // provider has to be written to directly for it to reconfigure the runtime.
                 chatProvider?.aiChatWorkingDirectory = url.path
-                Task { await chatProvider?.discoverClaudeConfig() }
-                if chatProvider?.workingDirectory == nil {
-                  chatProvider?.workingDirectory = url.path
-                }
+                // Unconditional. The old `== nil` guard meant choosing a *second* workspace left
+                // the agent's file-system root on the first one, so the next provider switch
+                // (`effectiveAgentWorkingDirectory()`) handed the runtime the abandoned project.
+                chatProvider?.workingDirectory = url.path
+                Task { await rediscoverAIChatConfig() }
               }
             }
             .buttonStyle(OmiButtonStyle(.primary, size: .compact))
@@ -490,8 +263,8 @@ extension SettingsContentView {
               Button("Clear") {
                 aiChatWorkingDirectory = ""
                 chatProvider?.aiChatWorkingDirectory = ""
-                Task { await chatProvider?.discoverClaudeConfig() }
                 chatProvider?.workingDirectory = nil
+                Task { await rediscoverAIChatConfig() }
               }
               .buttonStyle(OmiButtonStyle(.primary, size: .compact))
             }
@@ -890,97 +663,6 @@ extension SettingsContentView {
     }
     .task {
       await loadChatMessageCount()
-    }
-  }
-
-  var featureTiersSubsection: some View {
-    VStack(spacing: OmiSpacing.xl) {
-      settingsCard(settingId: "advanced.featuretiers") {
-        VStack(alignment: .leading, spacing: OmiSpacing.lg) {
-          HStack(spacing: OmiSpacing.sm) {
-            Image(systemName: "lock.shield")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Feature Tiers")
-              .scaledFont(size: OmiType.subheading, weight: .medium)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-          }
-
-          GlassSeparator()
-
-          // Tier picker — radio-style selector
-          VStack(alignment: .leading, spacing: OmiSpacing.xs) {
-            tierPickerRow(tier: 0, label: "Show All Features", subtitle: "Unlock everything")
-            tierPickerRow(tier: 1, label: "Tier 1", subtitle: "Conversations + Rewind")
-            tierPickerRow(tier: 2, label: "Tier 2", subtitle: "+ Memories (100 memories)")
-            tierPickerRow(tier: 3, label: "Tier 3", subtitle: "+ Tasks (100 tasks)")
-            tierPickerRow(tier: 4, label: "Tier 4", subtitle: "+ AI Chat (100 conversations)")
-            tierPickerRow(
-              tier: 5, label: "Tier 5", subtitle: "+ Home (200 convos + 2K screenshots)")
-            tierPickerRow(tier: 6, label: "Tier 6", subtitle: "+ Apps (300 conversations)")
-          }
-
-          if currentTierLevel > 0 {
-            GlassSeparator()
-
-            Text("Progress")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.secondary)
-
-            // Tier 1 — always unlocked
-            tierFeatureRow(
-              tier: 1, name: "Conversations + Rewind",
-              requirement: "Always unlocked",
-              progress: nil, unlocked: true
-            )
-
-            // Tier 2 — 100 memories
-            tierFeatureRow(
-              tier: 2, name: "Memories",
-              requirement: "100 memories",
-              progress: advancedStats.map { "\($0.memoriesTotal) / 100" },
-              unlocked: currentTierLevel >= 2
-            )
-
-            // Tier 3 — 100 tasks
-            tierFeatureRow(
-              tier: 3, name: "Tasks",
-              requirement: "100 tasks (todo + done)",
-              progress: advancedStats.map { "\($0.tasksTodo + $0.tasksDone) / 100" },
-              unlocked: currentTierLevel >= 3
-            )
-
-            // Tier 4 — 100 conversations
-            tierFeatureRow(
-              tier: 4, name: "AI Chat",
-              requirement: "100 conversations",
-              progress: advancedStats.map { "\($0.conversations) / 100" },
-              unlocked: currentTierLevel >= 4
-            )
-
-            // Tier 5 — 200 conversations + 2,000 screenshots
-            tierFeatureRow(
-              tier: 5, name: "Home",
-              requirement: "200 conversations + 2K screenshots",
-              progress: advancedStats.map {
-                "\($0.conversations) / 200 convos, \($0.screenshotsTotal) / 2,000 screenshots"
-              },
-              unlocked: currentTierLevel >= 5
-            )
-
-            // Tier 6 — 300 conversations
-            tierFeatureRow(
-              tier: 6, name: "Apps",
-              requirement: "300 conversations",
-              progress: advancedStats.map { "\($0.conversations) / 300" },
-              unlocked: currentTierLevel >= 6
-            )
-          }
-        }
-      }
     }
   }
 

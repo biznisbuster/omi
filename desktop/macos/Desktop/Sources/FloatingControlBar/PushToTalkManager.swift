@@ -3599,12 +3599,17 @@ class PushToTalkManager: ObservableObject {
     keywords: [String], language: String, allowNetwork: Bool,
     label: DictationRecognizerLabel = DictationRecognizerLabel()
   ) -> DictationTranscriber {
-    DictationTranscriber(
-      isOnline: allowNetwork && NetworkReachability.shared.isOnline,
+    // Dictation has its own recognizer pin: a transcript-lane engine choice
+    // (often picked for a specific language) must not silently take over the
+    // caret, and an On-device dictation must never touch the network.
+    let preference = PTTDictationTranscriptionPreference.current
+    return DictationTranscriber(
+      isOnline: allowNetwork && preference != .onDevice
+        && NetworkReachability.shared.isOnline,
       backend: { audio in
         // The user's pinned recognizer decodes dictation too; the built-in
         // cloud batch recognizer is the fallback when it cannot.
-        if PTTTranscriptionPreference.current == .transcriptEngine,
+        if preference == .transcriptEngine,
           let result = try? await TranscriptEngineClient.configured.transcribe(
             pcm16k: audio, language: language),
           !result.transcript.isEmpty

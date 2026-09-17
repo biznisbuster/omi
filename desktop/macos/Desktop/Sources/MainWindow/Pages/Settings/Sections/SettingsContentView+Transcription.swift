@@ -12,44 +12,9 @@ extension SettingsContentView {
         MicrophonePickerCard(onChanged: { restartTranscriptionIfNeeded() })
       }
 
-      // Which recognizer decodes voice that is answered by the chat model.
-      // Live voice (realtime model) transcribes inside that model and is chosen
-      // by the Voice Model picker instead.
-      settingsCard(settingId: "transcription.sttengine") {
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "waveform.badge.magnifyingglass")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Speech-to-Text Engine")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            SettingsMenuPicker(selection: $pttTranscriptionPreference) {
-              ForEach(PTTTranscriptionPreference.allCases, id: \.rawValue) { engine in
-                Text(engine.displayName).tag(engine.rawValue)
-              }
-            }
-          }
-
-          Text(
-            (PTTTranscriptionPreference(rawValue: pttTranscriptionPreference) ?? .automatic).subtitle
-          )
-          .scaledFont(size: OmiType.caption)
-          .foregroundColor(Ink.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-
-          Text(
-            "Applies when a voice question is transcribed first and then answered by the chat model. Live voice (realtime) transcribes inside the Voice Model you pick."
-          )
-          .scaledFont(size: OmiType.caption)
-          .foregroundColor(Ink.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        }
-      }
+      // The recognizer a voice turn is decoded with now lives beside the answer
+      // mode that decides whether it is used at all: Settings → Voice & Models.
+      // Ambient transcription below still uses its own language settings.
 
       // Language Mode
       settingsCard(settingId: "transcription.languagemode") {

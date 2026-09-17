@@ -127,106 +127,9 @@ extension SettingsContentView {
         }
       }
 
-      // Push-to-talk replies are always spoken, so `hasAnyFloatingBarVoiceAnswersEnabled` is a
-      // constant and these two never dimmed. A greyed, unresponsive control is how the rest of
-      // this pane says "the thing behind this is off" — spending that signal on a state no
-      // setting can reach makes a live control read as dead.
-      voicePicker(settingId: "floatingbar.voice")
-
-      voiceSpeedSlider(settingId: "floatingbar.voicespeed")
-    }
-  }
-
-  func voicePicker(settingId: String) -> some View {
-    settingsCard(settingId: settingId) {
-      VStack(alignment: .leading, spacing: OmiSpacing.md) {
-        HStack(spacing: OmiSpacing.lg) {
-          VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
-            Text("Voice")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-            Text(
-              ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).description
-            )
-            .scaledFont(size: OmiType.body)
-            .foregroundColor(Ink.secondary)
-          }
-          Spacer()
-          SettingsMenuPicker(selection: $shortcutSettings.selectedVoiceID) {
-            ForEach(ShortcutSettings.availableVoices) { voice in
-              Text(voice.name).tag(voice.id)
-            }
-          }
-        }
-
-        if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isLocalPiper {
-          localVoiceInstallRow
-        }
-      }
-    }
-  }
-
-  /// Installation state for the on-device Piper voice. The download is ~110 MB
-  /// and happens once per Mac; until it finishes, replies fall back to the
-  /// system voice rather than failing.
-  @ViewBuilder
-  var localVoiceInstallRow: some View {
-    HStack(spacing: OmiSpacing.sm) {
-      if LocalVoiceSynthesisService.shared.isInstalled {
-        Image(systemName: "checkmark.seal.fill")
-          .foregroundColor(Ink.listeningGreen)
-        Text(
-          "On-device voice installed. Replies are synthesized on this Mac — nothing is sent to a cloud voice service."
-        )
-        .scaledFont(size: OmiType.caption)
-        .foregroundColor(Ink.secondary)
-      } else if isInstallingLocalVoice {
-        ProgressView().controlSize(.mini)
-        Text(localVoiceInstallMessage ?? "Installing local voice…")
-          .scaledFont(size: OmiType.caption)
-          .foregroundColor(Ink.secondary)
-      } else {
-        Button("Install local voice (~110 MB)") {
-          startLocalVoiceInstall()
-        }
-        .buttonStyle(.plain)
-        .scaledFont(size: OmiType.caption, weight: .semibold)
-        .foregroundColor(Ink.primary)
-        if let localVoiceInstallError {
-          Text(localVoiceInstallError)
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(SettingsInk.notice)
-        }
-      }
-      Spacer()
-    }
-  }
-
-  func startLocalVoiceInstall() {
-    guard !isInstallingLocalVoice else { return }
-    isInstallingLocalVoice = true
-    localVoiceInstallError = nil
-    localVoiceInstallMessage = "Preparing download…"
-    Task {
-      do {
-        try await LocalVoiceSynthesisService.shared.ensureInstalled { message in
-          Task { @MainActor in
-            localVoiceInstallMessage = message
-          }
-        }
-        await MainActor.run {
-          isInstallingLocalVoice = false
-          localVoiceInstallMessage = nil
-          FloatingBarVoicePlaybackService.shared.playVoiceSample(
-            voiceID: shortcutSettings.selectedVoiceID)
-        }
-      } catch {
-        await MainActor.run {
-          isInstallingLocalVoice = false
-          localVoiceInstallMessage = nil
-          localVoiceInstallError = error.localizedDescription
-        }
-      }
+      // Voice replies are always spoken; the voice itself, its speed, and the
+      // Live/Transcript distinction live together in Settings → Voice & Models
+      // so the speaking model is never confused with the transcription model.
     }
   }
 
@@ -234,79 +137,13 @@ extension SettingsContentView {
     ShortcutsSettingsSection(highlightedSettingId: $highlightedSettingId)
   }
 
+  /// The AI Chat tools that have no other door: the Ask/Act toggle, the
+  /// discovered CLAUDE.md files, and the skill list. The provider, workspace,
+  /// browser extension, and Dev Mode cards live in AI & Automation
+  /// (`aiSetupSubsection`) — one door per setting; this pane used to carry
+  /// second copies that had already drifted apart.
   var aiChatSection: some View {
     VStack(spacing: OmiSpacing.xl) {
-      // AI Provider card
-      settingsCard(settingId: "aichat.provider") {
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "cpu")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("AI Provider")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            SettingsMenuPicker(selection: $chatBridgeMode) {
-              ForEach(AIProvider.all) { provider in
-                Text(provider.displayName).tag(provider.bridgeModeRawValue)
-              }
-            }
-            .onChange(of: chatBridgeMode) { _, newMode in
-              if let mode = ChatProvider.BridgeMode(rawValue: newMode) {
-                Task {
-                  await chatProvider?.switchBridgeMode(to: mode)
-                }
-              }
-            }
-          }
-
-          if let provider = AIProvider.from(bridgeMode: chatBridgeMode) {
-            if let url = provider.attributionURL {
-              Link(destination: url) {
-                Text("\(provider.tagline) · \(url.host ?? "")")
-                  .scaledFont(size: OmiType.caption)
-                  .foregroundColor(Ink.secondary)
-              }
-            } else {
-              Text(provider.tagline)
-                .scaledFont(size: OmiType.caption)
-                .foregroundColor(Ink.secondary)
-            }
-          }
-
-          if chatBridgeMode == "claudeCode" && chatProvider?.isClaudeConnected == true {
-            GlassSeparator()
-
-            HStack {
-              Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(Ink.listeningGreen)
-                .scaledFont(size: OmiType.caption)
-              Text("Connected to Claude")
-                .scaledFont(size: OmiType.caption)
-                .foregroundColor(Ink.secondary)
-
-              Spacer()
-
-              Button("Disconnect") {
-                Task {
-                  await chatProvider?.disconnectClaude()
-                }
-              }
-              .buttonStyle(.plain)
-              .scaledFont(size: OmiType.caption, weight: .medium)
-              .foregroundColor(Ink.errorRed)
-            }
-          }
-        }
-      }
-      .onAppear {
-        chatProvider?.checkClaudeConnectionStatus()
-      }
-
       // Ask Mode card
       settingsCard(settingId: "aichat.askmode") {
         VStack(alignment: .leading, spacing: OmiSpacing.md) {
@@ -336,70 +173,6 @@ extension SettingsContentView {
       }
 
       // Workspace card
-      settingsCard(settingId: "aichat.workspace") {
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "folder")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Workspace")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            Button("Browse...") {
-              let panel = NSOpenPanel()
-              panel.canChooseFiles = false
-              panel.canChooseDirectories = true
-              panel.allowsMultipleSelection = false
-              panel.message = "Select a project directory"
-              if panel.runModal() == .OK, let url = panel.url {
-                aiChatWorkingDirectory = url.path
-                // `ChatProvider` holds its own `@AppStorage` wrapper over the same key, and a
-                // wrapper's `didSet` only fires for writes made through that wrapper — so the
-                // provider has to be written to directly for it to reconfigure the runtime.
-                chatProvider?.aiChatWorkingDirectory = url.path
-                // Unconditional. The old `== nil` guard meant choosing a *second* workspace left
-                // the agent's file-system root on the first one, so the next provider switch
-                // (`effectiveAgentWorkingDirectory()`) handed the runtime the abandoned project.
-                chatProvider?.workingDirectory = url.path
-                Task { await rediscoverAIChatConfig() }
-              }
-            }
-            .buttonStyle(OmiButtonStyle(.primary, size: .compact))
-
-            if !aiChatWorkingDirectory.isEmpty {
-              Button("Clear") {
-                aiChatWorkingDirectory = ""
-                chatProvider?.aiChatWorkingDirectory = ""
-                chatProvider?.workingDirectory = nil
-                Task { await rediscoverAIChatConfig() }
-              }
-              .buttonStyle(OmiButtonStyle(.primary, size: .compact))
-            }
-          }
-
-          if !aiChatWorkingDirectory.isEmpty {
-            Text(aiChatWorkingDirectory)
-              .scaledFont(size: OmiType.caption)
-              .foregroundColor(Ink.secondary)
-              .lineLimit(1)
-              .truncationMode(.middle)
-
-            Text("Project-level CLAUDE.md and skills will be discovered from this directory")
-              .scaledFont(size: OmiType.caption)
-              .foregroundColor(Ink.secondary)
-          } else {
-            Text(
-              "No workspace set. Set a project directory to discover project-level CLAUDE.md and skills."
-            )
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(Ink.secondary)
-          }
-        }
-      }
 
       // CLAUDE.md card
       settingsCard(settingId: "aichat.claudemd") {
@@ -658,163 +431,13 @@ extension SettingsContentView {
           }
         }
       }
-
-      // Browser Extension card
-      settingsCard(settingId: "aichat.browserextension") {
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "globe")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Browser Extension")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            if !playwrightExtensionToken.isEmpty {
-              HStack(spacing: OmiSpacing.xxs) {
-                Circle()
-                  .fill(Ink.listeningGreen)
-                  .frame(width: 6, height: 6)
-                Text("Connected")
-                  .scaledFont(size: OmiType.caption)
-                  .foregroundColor(Ink.secondary)
-              }
-            }
-
-            // No `onChange` hook: `ChatProvider` and `AgentRuntimeProcess` both read this key
-            // from `UserDefaults` (the former through a KVO publisher), so the `@AppStorage`
-            // write *is* the propagation. An empty handler here only looked like wiring.
-            Toggle("", isOn: $playwrightUseExtension)
-              .toggleStyle(OmiToggleStyle())
-              .controlSize(.small)
-              .labelsHidden()
-          }
-
-          Text("Lets the AI use your Chrome browser with all your logged-in sessions.")
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(Ink.secondary)
-
-          if playwrightUseExtension {
-            if playwrightExtensionToken.isEmpty {
-              // No token — show "Set Up" button
-              Button(action: {
-                showBrowserSetup = true
-              }) {
-                HStack(spacing: OmiSpacing.xs) {
-                  Image(systemName: "wrench.and.screwdriver")
-                    .scaledFont(size: OmiType.caption)
-                  Text("Set Up")
-                    .scaledFont(size: OmiType.body, weight: .medium)
-                }
-              }
-              .buttonStyle(OmiButtonStyle(.primary, size: .compact))
-            } else {
-              // Token is set — show compact view
-              HStack(spacing: OmiSpacing.sm) {
-                Text("Token")
-                  .scaledFont(size: OmiType.caption)
-                  .foregroundColor(Ink.secondary)
-
-                Text(String(playwrightExtensionToken.prefix(8)) + "...")
-                  .scaledFont(size: OmiType.caption, weight: .medium)
-                  .foregroundColor(Ink.primary)
-                  .font(.system(.body, design: .monospaced))
-
-                Spacer()
-
-                Button(action: {
-                  showBrowserSetup = true
-                }) {
-                  HStack(spacing: OmiSpacing.xxs) {
-                    Image(systemName: "arrow.clockwise")
-                      .scaledFont(size: OmiType.caption)
-                    Text("Reconfigure")
-                      .scaledFont(size: OmiType.caption)
-                  }
-                }
-                .buttonStyle(OmiButtonStyle(.primary, size: .compact))
-
-                Button(action: {
-                  playwrightExtensionToken = ""
-                  UserDefaults.standard.set("", forKey: "playwrightExtensionToken")
-                }) {
-                  HStack(spacing: OmiSpacing.xxs) {
-                    Image(systemName: "xmark")
-                      .scaledFont(size: OmiType.caption)
-                    Text("Reset")
-                      .scaledFont(size: OmiType.caption)
-                  }
-                }
-                .buttonStyle(OmiButtonStyle(.primary, size: .compact))
-              }
-            }
-          }
-        }
-      }
-
-      // Dev Mode card
-      settingsCard(settingId: "aichat.devmode") {
-        VStack(alignment: .leading, spacing: OmiSpacing.md) {
-          HStack {
-            Image(systemName: "hammer")
-              .scaledFont(size: OmiType.subheading)
-              .foregroundColor(Ink.secondary)
-
-            Text("Dev Mode")
-              .scaledFont(size: OmiType.subheading, weight: .semibold)
-              .foregroundColor(Ink.primary)
-
-            Spacer()
-
-            Toggle("", isOn: $devModeEnabled)
-              .toggleStyle(OmiToggleStyle())
-              .controlSize(.small)
-              .labelsHidden()
-              .onChange(of: devModeEnabled) { _, newValue in
-                AnalyticsManager.shared.settingToggled(setting: "dev_mode", enabled: newValue)
-              }
-          }
-
-          Text("Let the AI modify the app's source code, rebuild it, and add custom features.")
-            .scaledFont(size: OmiType.caption)
-            .foregroundColor(Ink.secondary)
-
-          if devModeEnabled {
-            VStack(alignment: .leading, spacing: OmiSpacing.sm) {
-              HStack(spacing: OmiSpacing.xs) {
-                Image(systemName: "checkmark.circle.fill")
-                  .foregroundColor(Ink.listeningGreen)
-                  .scaledFont(size: OmiType.caption)
-                Text("AI can modify UI, add features, create custom SQLite tables")
-                  .scaledFont(size: OmiType.caption)
-                  .foregroundColor(Ink.secondary)
-              }
-              HStack(spacing: OmiSpacing.xs) {
-                Image(systemName: "lock.fill")
-                  .foregroundColor(SettingsInk.notice)
-                  .scaledFont(size: OmiType.caption)
-                Text("Backend API, auth, and sync logic are read-only")
-                  .scaledFont(size: OmiType.caption)
-                  .foregroundColor(Ink.secondary)
-              }
-            }
-          }
-        }
-      }
     }
     .onAppear {
       refreshAIChatConfig()
-      playwrightExtensionToken =
-        UserDefaults.standard.string(forKey: "playwrightExtensionToken") ?? ""
     }
-    // The browser-setup sheet is presented once, by `SettingsContentView.body`, because the
-    // identical Browser Extension card in Advanced shares `showBrowserSetup`. A second `.sheet`
-    // on the same binding inside this subtree is a competing presenter for one piece of state:
-    // AppKit honours one of them and logs the other, which is a coin toss over whether "Set Up"
-    // opens anything.
+    // The file viewer is this pane's only sheet; the browser-setup sheet is
+    // presented by `SettingsContentView.body` because the Browser Extension
+    // card lives in AI & Automation.
     .sheet(isPresented: $showFileViewer) {
       fileViewerSheet
     }

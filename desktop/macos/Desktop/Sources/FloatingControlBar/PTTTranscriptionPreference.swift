@@ -118,6 +118,57 @@ enum PTTTranscriptionRoutePolicy {
   }
 }
 
+/// Which recognizer serves dictation (Omi Type voice typing), chosen separately
+/// from the transcript lane.
+///
+/// The two lanes are different jobs: a transcript turn is a question for the
+/// chat model, while a dictation is text for the focused app. Keeping one pin
+/// for both meant a user's own local engine — picked for Serbian transcript
+/// turns — silently became the dictating recognizer too, and picking a dictation
+/// engine for the caret could redirect the chat lane. The order inside a
+/// dictation stays "backend recognizer, then the bundled on-device model"; this
+/// choice decides which backend recognizer a dictation may use.
+enum PTTDictationTranscriptionPreference: String, CaseIterable, Sendable {
+  /// Omi's cloud batch recognizer, with the on-device model as fallback.
+  case automatic
+  /// On-device Parakeet only. A dictation never leaves this Mac.
+  case onDevice
+  /// Cloud batch recognizer only.
+  case cloud
+  /// The user's own local Transcript Engine server, falling back to the
+  /// built-in chain when it cannot serve the turn.
+  case transcriptEngine
+
+  static let defaultsKey = "pttDictationTranscriptionPreference"
+
+  static var current: PTTDictationTranscriptionPreference {
+    guard
+      let raw = UserDefaults.standard.string(forKey: defaultsKey),
+      let value = PTTDictationTranscriptionPreference(rawValue: raw)
+    else { return .automatic }
+    return value
+  }
+
+  var displayName: String {
+    switch self {
+    case .automatic: return "Automatic"
+    case .onDevice: return "On-device (Parakeet v3)"
+    case .cloud: return "Cloud (Omi batch)"
+    case .transcriptEngine: return "Transcript Engine (local)"
+    }
+  }
+
+  var subtitle: String {
+    switch self {
+    case .automatic: return "Omi cloud batch first, then the on-device model"
+    case .onDevice: return "Private and offline: a dictation never leaves this Mac"
+    case .cloud: return "Omi's batch speech endpoint only"
+    case .transcriptEngine:
+      return "Your own engine first; the built-in chain takes over when it is down"
+    }
+  }
+}
+
 /// Raised when a turn is pinned to the on-device recognizer and the decode
 /// produced nothing. The turn reports a transcription failure instead of
 /// quietly routing the user's audio to a cloud recognizer they did not choose.

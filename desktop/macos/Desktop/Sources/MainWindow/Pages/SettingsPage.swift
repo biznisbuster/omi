@@ -204,7 +204,6 @@ struct SettingsContentView: View {
   // Log export state
 
   // Focus Assistant states
-  @State var glowOverlayEnabled: Bool
   @State var analysisDelay: Int
   @State var liveSuggestionsEnabled: Bool
 
@@ -239,9 +238,6 @@ struct SettingsContentView: View {
   // Goals states
   @State var goalsAutoGenerateEnabled: Bool = GoalGenerationService.shared
     .isAutoGenerationEnabled
-
-  // Glow preview state
-  @State var isPreviewRunning: Bool = false
 
   // Tier gating (0 = show all, 1-6 = sequential tiers)
   @AppStorage("currentTierLevel") var currentTierLevel = 0
@@ -360,7 +356,6 @@ struct SettingsContentView: View {
 
   // Multi-chat mode setting
   @AppStorage("multiChatEnabled") var multiChatEnabled = false
-  @AppStorage("conversationsCompactView") var conversationsCompactView = true
   @AppStorage("speakNotificationsAloud") var speakNotificationsAloud = false
   @AppStorage(DefaultsKey.integrationNudgesEnabled.rawValue) var integrationNudgesEnabled = true
 
@@ -370,6 +365,10 @@ struct SettingsContentView: View {
     RealtimeOmniProvider.geminiFlashLive.rawValue
   @AppStorage(PTTTranscriptionPreference.defaultsKey) var pttTranscriptionPreference: String =
     PTTTranscriptionPreference.automatic.rawValue
+  @AppStorage(PTTDictationTranscriptionPreference.defaultsKey)
+  var pttDictationTranscriptionPreference: String =
+    PTTDictationTranscriptionPreference.automatic.rawValue
+  @AppStorage(TranscriptEngineClient.baseURLDefaultsKey) var transcriptEngineBaseURL: String = ""
   @AppStorage(PTTVoiceMode.defaultsKey) var pttVoiceMode: String = PTTVoiceMode.live.rawValue
   @AppStorage(BackgroundAgentProvider.defaultsKey) var backgroundAgentProvider: String =
     BackgroundAgentProvider.omiManaged.rawValue
@@ -405,6 +404,7 @@ struct SettingsContentView: View {
     case general = "General"
     case rewind = "Rewind"
     case transcription = "Transcription"
+    case voice = "Voice"
     case notifications = "Notifications"
     case privacy = "Privacy"
     case account = "Account"
@@ -447,6 +447,7 @@ struct SettingsContentView: View {
       case .account, .planUsage: return "Account & Plan"
       case .notifications, .privacy: return "Alerts & Privacy"
       case .advanced: return "AI & Automation"
+      case .voice: return "Voice & Models"
       default: return rawValue
       }
     }
@@ -487,67 +488,11 @@ struct SettingsContentView: View {
     }
   }
 
-  enum AdvancedSubsection: String, CaseIterable {
-    case resetOnboarding = "Reset Onboarding"
-    case aiUserProfile = "AI User Profile"
-    case stats = "Your Stats"
-    case focusAssistant = "Focus Assistant"
-    case taskAssistant = "Task Assistant"
-    case insightAssistant = "Insight Assistant"
-    case memoryAssistant = "Memory Assistant"
-    case analysisThrottle = "Analysis Throttle"
-    case goals = "Goals"
-    case preferences = "Preferences"
-    case troubleshooting = "Troubleshooting"
-    case gmailReader = "Gmail Reader"
-    case calendarSync = "Calendar Sync"
-    case developerKeys = "Developer API Keys"
-
-    var icon: String {
-      switch self {
-      case .resetOnboarding: return "arrow.counterclockwise"
-      case .aiUserProfile: return "brain"
-      case .stats: return "chart.bar"
-      case .focusAssistant: return "eye.fill"
-      case .taskAssistant: return "checklist"
-      case .insightAssistant: return ProactiveNotificationBadge.insightSystemImage
-      case .memoryAssistant: return "brain.head.profile"
-      case .analysisThrottle: return "clock.arrow.2.circlepath"
-      case .goals: return "target"
-      case .preferences: return "slider.horizontal.3"
-      case .troubleshooting: return "wrench.and.screwdriver"
-      case .gmailReader: return "envelope.fill"
-      case .calendarSync: return "calendar"
-      case .developerKeys: return "key"
-      }
-    }
-  }
-
   /// Raised by the Reset Onboarding card here; **presented by `SettingsPage`**, which owns a surface
   /// this scrolling column does not — see the property there.
   @Binding var showResetOnboardingConfirm: Bool
   @State var showRescanFilesAlert: Bool = false
   @State var showDeleteAccountAlert: Bool = false
-
-  // Gmail Reader states
-  @State var gmailEmails: [GmailEmail] = []
-  @State var isReadingGmail: Bool = false
-  @State var isSavingGmailMemories: Bool = false
-  @State var gmailMemoriesSaved: Int = 0
-  @State var gmailReadError: String?
-  @State var gmailLastFetched: Date?
-  @State var gmailReadGeneration = 0
-  @State var gmailAccounts: [GmailAccountOption] = []
-  @State var isProbingGmailAccounts: Bool = false
-  @State var showingGmailAccountPicker: Bool = false
-
-  // Calendar Sync states
-  @State var calendarEvents: [CalendarEvent] = []
-  @State var isReadingCalendar: Bool = false
-  @State var calendarMemoriesCreated: Int = 0
-  @State var calendarTasksCreated: Int = 0
-  @State var calendarSyncError: String?
-  @State var calendarLastSynced: Date?
 
   @State var isDeletingAccount: Bool = false
   @State var deleteAccountError: String?
@@ -583,7 +528,6 @@ struct SettingsContentView: View {
     let settings = AssistantSettings.shared
     _isMonitoring = State(initialValue: ProactiveAssistantsPlugin.shared.isMonitoring)
     _screenCaptureHealth = State(initialValue: ProactiveAssistantsPlugin.shared.screenCaptureHealth)
-    _glowOverlayEnabled = State(initialValue: settings.glowOverlayEnabled)
     _analysisDelay = State(initialValue: settings.analysisDelay)
     _liveSuggestionsEnabled = State(initialValue: SuggestionAssistantSettings.shared.isEnabled)
     _taskEnabled = State(initialValue: TaskAssistantSettings.shared.isEnabled)
@@ -649,6 +593,8 @@ struct SettingsContentView: View {
           rewindSection
         case .transcription:
           transcriptionSection
+        case .voice:
+          voiceSection
         case .notifications, .privacy:
           notificationsSection
           mergedSectionHeader(title: "Privacy", icon: "lock.shield")

@@ -10,12 +10,12 @@ covers:
   - desktop/macos/Desktop/Sources/ProactiveAssistants/Core/AssistantCoordinator.swift
   - desktop/macos/Desktop/Sources/ProactiveAssistants/ContextReminders/ContextReminderCoordinator.swift
   - desktop/macos/Desktop/Sources/MainWindow/Pages/Settings/Sections/SettingsContentView+FloatingBarAndChat.swift
+  - desktop/macos/Desktop/Sources/MainWindow/Pages/Settings/Sections/SettingsContentView+Voice.swift
   - desktop/macos/Desktop/Sources/MainWindow/Pages/Settings/Sections/SettingsContentView+Advanced.swift
+  - desktop/macos/Desktop/Sources/FloatingControlBar/PTTTranscriptionPreference.swift
   - desktop/macos/Desktop/Sources/MainWindow/Pages/Settings/Sections/SettingsContentView+Assistants.swift
   - desktop/macos/Desktop/Sources/MainWindow/Pages/Settings/Sections/SettingsContentView+DeveloperKeys.swift
   - desktop/macos/Desktop/Sources/BYOKValidator.swift
-  - desktop/macos/Desktop/Sources/MainWindow/Pages/Settings/Sections/SettingsContentView+Integrations.swift
-  - desktop/macos/Desktop/Sources/Integrations/GmailAccountPickerView.swift
   - desktop/macos/Desktop/Sources/MainWindow/Pages/ChatLabView.swift
   - desktop/macos/Desktop/Sources/Chat/ChatResource.swift
   - desktop/macos/Desktop/Sources/Chat/ClaudeAuthSheet.swift
@@ -50,6 +50,15 @@ steps:
       ok: true
 
   - id: S3
+    name: Open the Voice & Models section
+    bridge.navigate:
+      target: settings
+      settingsSection: Voice
+      activateApp: false
+    wait:
+      state.selectedSettingsSection: Voice
+
+  - id: S4
     name: Logs clean
     log.expect:
       absent:

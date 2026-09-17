@@ -98,6 +98,45 @@ final class PTTTranscriptionPreferenceTests: XCTestCase {
     XCTAssertEqual(PTTVoiceMode.allCases.map(\.displayName), ["Voice Live", "Voice Transcript"])
   }
 
+  // MARK: - Dictation recognizer pin
+
+  func testDictationPreferenceRoundTripsAndNamesEveryEngine() {
+    XCTAssertEqual(
+      PTTDictationTranscriptionPreference(rawValue: "transcriptEngine"), .transcriptEngine)
+    XCTAssertEqual(
+      PTTDictationTranscriptionPreference.allCases.map(\.displayName),
+      ["Automatic", "On-device (Parakeet v3)", "Cloud (Omi batch)", "Transcript Engine (local)"],
+      "dictation offers the same recognizers as the transcript lane")
+    XCTAssertEqual(
+      PTTDictationTranscriptionPreference.defaultsKey, "pttDictationTranscriptionPreference")
+  }
+
+  func testDictationPreferenceReadsItsOwnKeyNotTheTranscriptPin() {
+    let defaults = UserDefaults.standard
+    let transcriptKey = PTTTranscriptionPreference.defaultsKey
+    let dictationKey = PTTDictationTranscriptionPreference.defaultsKey
+    let previousTranscript = defaults.string(forKey: transcriptKey)
+    let previousDictation = defaults.string(forKey: dictationKey)
+    defer {
+      for (key, value) in [
+        (transcriptKey, previousTranscript), (dictationKey, previousDictation),
+      ] {
+        if let value {
+          defaults.set(value, forKey: key)
+        } else {
+          defaults.removeObject(forKey: key)
+        }
+      }
+    }
+
+    defaults.set(PTTTranscriptionPreference.transcriptEngine.rawValue, forKey: transcriptKey)
+    defaults.removeObject(forKey: dictationKey)
+
+    XCTAssertEqual(
+      PTTDictationTranscriptionPreference.current, .automatic,
+      "a transcript-lane engine pin must not silently become the dictation recognizer")
+  }
+
   // MARK: - Auto frozen out of the voice picker
 
   func testVoiceModelPickerOffersNoAuto() {
