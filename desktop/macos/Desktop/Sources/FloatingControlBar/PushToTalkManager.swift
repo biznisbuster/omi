@@ -368,13 +368,6 @@ class PushToTalkManager: ObservableObject {
   // Batch mode: accumulate raw audio for post-recording transcription
   private var batchAudioBuffer = Data()
   private let batchAudioLock = NSLock()
-  /// The Transcript Engine's progressive session for the current transcript-lane
-  /// turn. A speed layer only: `batchAudioBuffer` stays the fallback source of
-  /// truth, so a stream that never starts (engine down) or fails mid-turn still
-  /// transcribes the whole utterance through the batch path.
-  private var transcriptEngineStream: TranscriptEngineStreamClient?
-  private var transcriptEngineStreamStartTask: Task<Void, Never>?
-  private var transcriptEnginePartialTask: Task<Void, Never>?
   /// Hard cap on a single turn's buffered PCM (16 kHz mono int16) so a runaway
   /// (>~4.5 min) dictation can't grow RSS without bound. Kept just under the
   /// backend's ~5-min limit (HTTP 413) so we surface a client-side warning before
@@ -951,7 +944,6 @@ class PushToTalkManager: ObservableObject {
     seenFinalSegmentIDs.removeAll()
     lastInterimText = ""
     currentContextSnapshot = nil
-    stopTranscriptEngineStream()
     batchAudioLock.lock()
     batchAudioBuffer = Data()
     batchAudioLock.unlock()
@@ -1782,14 +1774,7 @@ class PushToTalkManager: ObservableObject {
     )
     if decision.append { batchAudioBuffer.append(audioData) }
     if decision.warn { batchAudioOverflowSignaled = true }
-    let stream = transcriptEngineStream
     batchAudioLock.unlock()
-    // Tee the same bytes into the engine's live session so it decodes while the
-    // user is still holding the key. The actor buffers and uploads on its own
-    // pump; the audio thread never waits on the network.
-    if let stream, !voiceTypeSession.claimsTurn {
-      Task { await stream.append(pcm16k: audioData) }
-    }
     if decision.warn { showBatchAudioOverflowWarning(turn: turn) }
   }
 
@@ -2197,7 +2182,6 @@ class PushToTalkManager: ObservableObject {
   /// the buffer (on-device or cloud, per the user's engine choice) and sends
   /// the text to the selected chat model.
   private func startTranscriptVoiceRoute(startMicrophoneCapture: Bool) {
-    stopTranscriptEngineStream()
     batchAudioLock.lock()
     batchAudioBuffer = Data()
     batchAudioLock.unlock()
@@ -2205,93 +2189,12 @@ class PushToTalkManager: ObservableObject {
       voiceTurnCoordinator.publish(.selectRoute(turnID: turnID, route: .deepgramBatch))
     }
     log("PushToTalkManager: Voice Transcript mode — recording for the speech-to-text engine")
-    if PTTTranscriptionPreference.current == .transcriptEngine {
-      startTranscriptEngineStream()
-    }
     guard startMicrophoneCapture else { return }
     if let builtIn = preferredPTTInputOverrideDeviceID() {
       startMicCapture(batchMode: true, overrideDeviceID: builtIn)
     } else {
       startMicCapture(batchMode: true)
     }
-  }
-
-  /// Opens the engine's progressive session for this turn and publishes the
-  /// live partial text while the key is held. The engine decodes as the audio
-  /// arrives, so key-up waits only for the tail instead of the whole utterance.
-  private func startTranscriptEngineStream() {
-    let language = AssistantSettings.shared.effectiveTranscriptionLanguage
-    transcriptEngineStreamStartTask = Task { [weak self] in
-      // Find the running engine before dialing it: the engine's port can move
-      // between launches, and reporting "not answering" while it runs one port
-      // over is the wrong answer. A resolved neighbour is adopted so every
-      // later (synchronous) reader follows it too.
-      if case .resolved(let resolution) = await TranscriptEngineDiscovery.resolve() {
-        TranscriptEngineDiscovery.adopt(resolution)
-      }
-      guard let self, !Task.isCancelled else { return }
-      let stream = TranscriptEngineStreamClient()
-      self.transcriptEngineStream = stream
-      do {
-        try await stream.start(language: language)
-        guard !Task.isCancelled, self.transcriptEngineStream === stream else {
-          await stream.cancel()
-          return
-        }
-        self.startTranscriptEnginePartialPolling(stream: stream)
-      } catch {
-        // The engine is the user's chosen recognizer; say it is not answering
-        // instead of silently transcribing with something else.
-        guard self.transcriptEngineStream === stream else { return }
-        self.noteTranscriptEngineUnavailable(error)
-      }
-    }
-  }
-
-  private func startTranscriptEnginePartialPolling(stream: TranscriptEngineStreamClient) {
-    transcriptEnginePartialTask?.cancel()
-    transcriptEnginePartialTask = Task { [weak self] in
-      while !Task.isCancelled {
-        guard let self, self.transcriptEngineStream === stream,
-          let turnID = self.currentVoiceTurnID
-        else { return }
-        if let text = await stream.partialText(), !text.isEmpty {
-          self.voiceTurnCoordinator.publish(.transcriptChanged(turnID: turnID, text: text))
-        }
-        try? await Task.sleep(for: .milliseconds(600))
-      }
-    }
-  }
-
-  /// Visibility only: the turn still completes through the built-in chain, but
-  /// the user is told which recognizer actually answered.
-  private func noteTranscriptEngineUnavailable(_ error: Error) {
-    logError("PushToTalkManager: transcript engine session unavailable", error: error)
-    guard let turnID = currentVoiceTurnID else { return }
-    voiceTurnCoordinator.publish(
-      .hintChanged(
-        turnID: turnID, text: "Transcript Engine is not answering — using built-in recognition"))
-  }
-
-  /// Ends whatever stream the current turn still holds. Safe to call on every
-  /// route change; a stream that already finished is simply dropped.
-  private func stopTranscriptEngineStream() {
-    transcriptEnginePartialTask?.cancel()
-    transcriptEnginePartialTask = nil
-    transcriptEngineStreamStartTask?.cancel()
-    transcriptEngineStreamStartTask = nil
-    guard let stream = transcriptEngineStream else { return }
-    transcriptEngineStream = nil
-    Task { await stream.cancel() }
-  }
-
-  /// Hands the finished-turn stream to its reader exactly once.
-  private func takeTranscriptEngineStream() -> TranscriptEngineStreamClient? {
-    transcriptEnginePartialTask?.cancel()
-    transcriptEnginePartialTask = nil
-    transcriptEngineStreamStartTask = nil
-    defer { transcriptEngineStream = nil }
-    return transcriptEngineStream
   }
 
   @discardableResult
@@ -2607,8 +2510,6 @@ class PushToTalkManager: ObservableObject {
       } else if let turnID = currentVoiceTurnID {
         voiceTurnCoordinator.publish(.finish(turnID: turnID, reason: resolution.terminalReason))
       }
-      // The turn was discarded; nothing will read its stream.
-      stopTranscriptEngineStream()
       return
     }
     recordSilentMicRecoveryOutcome(silentMicRecoveryPolicy.recordSuccessfulTurn())
@@ -2621,37 +2522,13 @@ class PushToTalkManager: ObservableObject {
         let language = AssistantSettings.shared.effectiveTranscriptionLanguage
         self.activeTracer?.begin(
           "batch_transcribe", metadata: ["reason": isFallback ? "hub_warm_timeout" : "user_preference"])
-        let batchResult: TranscriptionService.BatchTranscriptionResult
-        if let stream = self.takeTranscriptEngineStream() {
-          // The turn was pre-decoded by the engine while the key was held; key-up
-          // waits only for the tail. A stream that failed falls back to the batch
-          // path with the whole buffered turn, and the user is told.
-          do {
-            let streamed = try await stream.finishAndRead()
-            self.noteVoiceTranscription(
-              provider: streamed.provider, model: streamed.model, language: language)
-            log(
-              "PushToTalkManager: \(source) streamed STT served the turn "
-                + "(transcript-engine/\(streamed.model ?? "-"), \(streamed.transcript.count) chars)")
-            batchResult = TranscriptionService.BatchTranscriptionResult(
-              transcript: streamed.transcript,
-              provider: streamed.provider,
-              model: streamed.model)
-          } catch {
-            self.noteTranscriptEngineUnavailable(error)
-            batchResult = try await self.batchTranscribeLocalFirst(
-              audioData: audio,
-              language: language,
-              contextKeywords: self.currentContextSnapshot?.keywords ?? []
-            )
-          }
-        } else {
-          batchResult = try await self.batchTranscribeLocalFirst(
-            audioData: audio,
-            language: language,
-            contextKeywords: self.currentContextSnapshot?.keywords ?? []
-          )
-        }
+        // The classic batch request: the engine decodes the whole turn after
+        // key-up. The live/progressive session is deliberately not used here.
+        let batchResult = try await self.batchTranscribeLocalFirst(
+          audioData: audio,
+          language: language,
+          contextKeywords: self.currentContextSnapshot?.keywords ?? []
+        )
         guard self.voiceTurnCoordinator.activeTurnID == turnID else { return }
         self.activeTracer?.end("batch_transcribe")
         log(
@@ -2796,10 +2673,6 @@ class PushToTalkManager: ObservableObject {
     // timeout, hub ready) do not reach the audio, which is what lets a hold
     // run for as long as the user likes.
     if voiceTypeSession.claimsTurn {
-      // The turn is a dictation now: the dictation pipeline owns the audio and
-      // transcribes it once at key-up, so a live engine session would only
-      // duplicate that work on the engine.
-      stopTranscriptEngineStream()
       appendBatchAudioBounded(audioData, turn: generation)
       return
     }

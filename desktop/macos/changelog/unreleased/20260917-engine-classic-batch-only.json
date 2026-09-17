@@ -1,0 +1,3 @@
+{
+  "change": "The Transcript Engine lane now uses the classic batch request only — no live/progressive session — and shows the engine's own error message when it refuses a turn (for example MODEL_NOT_AVAILABLE) instead of substituting a different recognizer"
+}
