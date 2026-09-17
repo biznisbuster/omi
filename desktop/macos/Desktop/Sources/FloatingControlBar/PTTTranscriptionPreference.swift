@@ -1,5 +1,40 @@
 import Foundation
 
+/// How a push-to-talk question is answered.
+enum PTTVoiceMode: String, CaseIterable, Sendable {
+  /// The realtime voice model hears the audio and answers directly.
+  case live
+  /// The turn is recorded, transcribed by the selected speech-to-text engine,
+  /// and sent to the selected chat model. No realtime model is involved.
+  case transcript
+
+  static let defaultsKey = "pttVoiceMode"
+
+  static var current: PTTVoiceMode {
+    guard
+      let raw = UserDefaults.standard.string(forKey: defaultsKey),
+      let value = PTTVoiceMode(rawValue: raw)
+    else { return .live }
+    return value
+  }
+
+  var displayName: String {
+    switch self {
+    case .live: return "Voice Live"
+    case .transcript: return "Voice Transcript"
+    }
+  }
+
+  var subtitle: String {
+    switch self {
+    case .live:
+      return "The realtime voice model listens and answers directly — lowest latency, native speech"
+    case .transcript:
+      return "Records, transcribes with the Speech-to-Text Engine, then sends the text to your chat model"
+    }
+  }
+}
+
 /// Which recognizer a transcription-lane PTT turn may use.
 ///
 /// The live-voice lane transcribes inside the realtime model and is not this

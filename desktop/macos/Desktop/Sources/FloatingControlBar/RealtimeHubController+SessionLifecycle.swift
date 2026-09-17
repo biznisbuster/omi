@@ -569,6 +569,13 @@ extension RealtimeHubController {
       // Only Gemini receives the PTT-down frame as in-turn video (see
       // `attachTurnScreenFrameIfNeeded`); no other session may be told an image always arrives.
       turnScreenFrameAttached: provider == .gemini)
+    // A pinned local provider for background agents is offered as the only
+    // spawn option and named in the tool description, so a voice spawn runs
+    // on the installed CLI rather than the managed lane. Uninstalled pins
+    // degrade to the registered set with no instruction.
+    let spawnProviders = BackgroundAgentSpawnPolicy.voiceProviderOptions(
+      configured: BackgroundAgentProvider.current,
+      registered: registeredDirectedProviderIDs)
     let s = RealtimeHubSession(
       provider: provider,
       auth: auth,
@@ -578,7 +585,8 @@ extension RealtimeHubController {
           provider: provider,
           isClientDirectBYOK: auth.isClientDirect,
           voiceModel: RealtimeOmniSettings.shared.selectedProvider),
-      availableDirectedProviders: registeredDirectedProviderIDs,
+      availableDirectedProviders: spawnProviders.options,
+      preferredDirectedProvider: spawnProviders.preferred,
       contextPlanID: topLevelContext.planID,
       stableCacheIdentity: topLevelContext.stableCacheIdentity,
       dynamicContextIdentity: topLevelContext.dynamicContextIdentity,

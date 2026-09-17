@@ -370,6 +370,9 @@ struct SettingsContentView: View {
     RealtimeOmniProvider.geminiFlashLive.rawValue
   @AppStorage(PTTTranscriptionPreference.defaultsKey) var pttTranscriptionPreference: String =
     PTTTranscriptionPreference.automatic.rawValue
+  @AppStorage(PTTVoiceMode.defaultsKey) var pttVoiceMode: String = PTTVoiceMode.live.rawValue
+  @AppStorage(BackgroundAgentProvider.defaultsKey) var backgroundAgentProvider: String =
+    BackgroundAgentProvider.omiManaged.rawValue
   @AppStorage("askModeEnabled") var askModeEnabled = false
   @AppStorage("aiChatWorkingDirectory") var aiChatWorkingDirectory: String = ""
   @State var aiChatClaudeMdContent: String?

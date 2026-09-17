@@ -47,6 +47,39 @@ final class PTTTranscriptionPreferenceTests: XCTestCase {
       .localFailed)
   }
 
+  // MARK: - Voice answer mode
+
+  func testTranscriptModeBypassesTheHubInBothAdmissionStates() {
+    XCTAssertEqual(
+      PTTRoutePolicy.decide(isOnline: true, admitsImmediately: true, voiceMode: .transcript),
+      .transcriptOnly)
+    XCTAssertEqual(
+      PTTRoutePolicy.decide(isOnline: true, admitsImmediately: false, voiceMode: .transcript),
+      .transcriptOnly,
+      "a warm socket must not be engaged when the user chose transcription")
+  }
+
+  func testLiveModeKeepsTheHubDecision() {
+    XCTAssertEqual(
+      PTTRoutePolicy.decide(isOnline: true, admitsImmediately: true, voiceMode: .live),
+      .hubImmediate)
+    XCTAssertEqual(
+      PTTRoutePolicy.decide(isOnline: true, admitsImmediately: false, voiceMode: .live),
+      .hubWarmWait)
+  }
+
+  func testOfflineStillDictatesInEitherMode() {
+    XCTAssertEqual(
+      PTTRoutePolicy.decide(isOnline: false, admitsImmediately: true, voiceMode: .transcript),
+      .onDeviceDictation,
+      "no network path means a dictation, whatever the answer mode says")
+  }
+
+  func testVoiceModeDefaultsToLiveAndRoundTrips() {
+    XCTAssertEqual(PTTVoiceMode(rawValue: "transcript"), .transcript)
+    XCTAssertEqual(PTTVoiceMode.allCases.map(\.displayName), ["Voice Live", "Voice Transcript"])
+  }
+
   // MARK: - Auto frozen out of the voice picker
 
   func testVoiceModelPickerOffersNoAuto() {

@@ -1,0 +1,3 @@
+{
+  "change": "Added a Background Agents provider choice: keep the Omi managed lane or run agents on a local CLI (Hermes/OpenClaw) without a plan"
+}

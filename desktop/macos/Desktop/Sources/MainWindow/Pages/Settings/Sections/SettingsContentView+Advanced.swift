@@ -192,6 +192,100 @@ extension SettingsContentView {
         }
       }
 
+      settingsCard(settingId: "aichat.voicemode") {
+        VStack(alignment: .leading, spacing: OmiSpacing.md) {
+          HStack {
+            Image(systemName: "waveform.and.mic")
+              .scaledFont(size: OmiType.subheading)
+              .foregroundColor(Ink.secondary)
+
+            Text("Voice Answer Mode")
+              .scaledFont(size: OmiType.subheading, weight: .semibold)
+              .foregroundColor(Ink.primary)
+
+            Spacer()
+
+            SettingsMenuPicker(selection: $pttVoiceMode) {
+              ForEach(PTTVoiceMode.allCases, id: \.rawValue) { mode in
+                Text(mode.displayName).tag(mode.rawValue)
+              }
+            }
+            .accessibilityIdentifier("aichat.voice_answer_mode")
+          }
+
+          Text(
+            (PTTVoiceMode(rawValue: pttVoiceMode) ?? .live).subtitle
+          )
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+
+          if (PTTVoiceMode(rawValue: pttVoiceMode) ?? .live) == .transcript {
+            Text(
+              "Transcription uses the Speech-to-Text Engine (Settings → Transcription); the answer comes from your chat model."
+            )
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(Ink.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+      }
+
+      settingsCard(settingId: "aichat.backgroundagents") {
+        let selectableProviders = BackgroundAgentProvider.allCases.filter { $0 == .omiManaged || $0.isInstalled }
+        let selectedProvider =
+          BackgroundAgentProvider(rawValue: backgroundAgentProvider) ?? .omiManaged
+
+        VStack(alignment: .leading, spacing: OmiSpacing.md) {
+          HStack {
+            Image(systemName: "person.2.badge.gearshape")
+              .scaledFont(size: OmiType.subheading)
+              .foregroundColor(Ink.secondary)
+
+            Text("Background Agents")
+              .scaledFont(size: OmiType.subheading, weight: .semibold)
+              .foregroundColor(Ink.primary)
+
+            Spacer()
+
+            SettingsMenuPicker(selection: $backgroundAgentProvider) {
+              ForEach(selectableProviders, id: \.rawValue) { provider in
+                Text(provider.displayName).tag(provider.rawValue)
+              }
+            }
+            .accessibilityIdentifier("aichat.background_agent_provider")
+            .onChange(of: backgroundAgentProvider) { _, _ in
+              // The spawn tool schema is baked into the warm realtime session, so
+              // a changed pin must rebuild it — same handoff the Voice Model uses.
+              NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
+            }
+          }
+
+          Text(selectedProvider.subtitle)
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(Ink.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+          if selectedProvider != .omiManaged, !selectedProvider.isInstalled {
+            Text(
+              "\(selectedProvider.displayName) is not installed right now — agents fall back to the Omi lane until it is."
+            )
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(PageGlass.warning)
+            .fixedSize(horizontal: false, vertical: true)
+          }
+
+          if selectableProviders.count == 1 {
+            Text(
+              "No local agent CLI detected. Install Hermes or OpenClaw to run background agents without an Omi plan."
+            )
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(Ink.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+      }
+
       settingsCard(settingId: "aichat.provider") {
         VStack(alignment: .leading, spacing: OmiSpacing.md) {
           HStack {

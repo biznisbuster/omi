@@ -92,6 +92,10 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
   private let auth: HubAuth
   private let instructions: String
   private let availableDirectedProviders: [String]
+  /// When the user pinned a local provider for background agents, the spawn
+  /// tool tells the model to pass it — voice spawns then run on the installed
+  /// CLI instead of the managed lane.
+  private let preferredDirectedProvider: String?
   /// Opaque cache-plan fields only; never raw conversation material.
   private let contextPlanID: String
   private let stableCacheIdentity: String
@@ -231,6 +235,7 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
     instructions: String,
     modelIDOverride: String? = nil,
     availableDirectedProviders: [String] = [],
+    preferredDirectedProvider: String? = nil,
     contextPlanID: String = "",
     stableCacheIdentity: String = "",
     dynamicContextIdentity: String = "",
@@ -245,6 +250,7 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
     self.instructions = instructions
     self.modelIDOverride = modelIDOverride
     self.availableDirectedProviders = availableDirectedProviders
+    self.preferredDirectedProvider = preferredDirectedProvider
     self.contextPlanID = contextPlanID
     self.stableCacheIdentity = stableCacheIdentity
     self.dynamicContextIdentity = dynamicContextIdentity
@@ -1203,7 +1209,9 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
           ],
           "output": Self.openAIOutputAudioConfig(),
         ],
-        "tools": RealtimeHubTools.openAITools(availableDirectedProviders: availableDirectedProviders),
+        "tools": RealtimeHubTools.openAITools(
+          availableDirectedProviders: availableDirectedProviders,
+          preferredProvider: preferredDirectedProvider),
         "tool_choice": "auto",
       ],
     ]
@@ -1233,7 +1241,8 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
           "tools": [
             [
               "functionDeclarations": RealtimeHubTools.geminiFunctionDeclarations(
-                availableDirectedProviders: availableDirectedProviders)
+                availableDirectedProviders: availableDirectedProviders,
+                preferredProvider: preferredDirectedProvider)
             ]
           ],
           "inputAudioTranscription": [:],

@@ -1401,6 +1401,14 @@ class PushToTalkManager: ObservableObject {
       return
     }
 
+    // Voice Transcript mode: nothing waits on the hub. Decode the buffer with
+    // the selected engine and hand the text to the chat model.
+    if PTTVoiceMode.current == .transcript {
+      activeTracer = nil
+      transcribeBufferedWarmWaitAudio(source: "transcript_mode", isFallback: false)
+      return
+    }
+
     if isWaitingForHub {
       voiceTurnCoordinator.publish(.responseWaitingChanged(turnID: turnID, active: true))
       updateBarState()
@@ -2137,7 +2145,8 @@ class PushToTalkManager: ObservableObject {
   private func startRealtimePTTRoute(startMicrophoneCapture: Bool) {
     let decision = PTTRoutePolicy.decide(
       isOnline: NetworkReachability.shared.isOnline,
-      admitsImmediately: RealtimeHubController.shared.pttAdmission == .immediate)
+      admitsImmediately: RealtimeHubController.shared.pttAdmission == .immediate,
+      voiceMode: PTTVoiceMode.current)
     switch decision {
     case .onDeviceDictation:
       startOnDeviceDictation(startMicrophoneCapture: startMicrophoneCapture)
@@ -2148,6 +2157,28 @@ class PushToTalkManager: ObservableObject {
       _ = startRealtimeHubCapture(bufferWhileWarming: !startMicrophoneCapture)
     case .hubWarmWait:
       startRealtimeHubWarmWait(startMicrophoneCapture: startMicrophoneCapture)
+    case .transcriptOnly:
+      startTranscriptVoiceRoute(startMicrophoneCapture: startMicrophoneCapture)
+    }
+  }
+
+  /// Voice Transcript mode: record the turn for the speech-to-text engine and
+  /// never engage the realtime hub. At release `continueFinalization` decodes
+  /// the buffer (on-device or cloud, per the user's engine choice) and sends
+  /// the text to the selected chat model.
+  private func startTranscriptVoiceRoute(startMicrophoneCapture: Bool) {
+    batchAudioLock.lock()
+    batchAudioBuffer = Data()
+    batchAudioLock.unlock()
+    if let turnID = currentVoiceTurnID {
+      voiceTurnCoordinator.publish(.selectRoute(turnID: turnID, route: .deepgramBatch))
+    }
+    log("PushToTalkManager: Voice Transcript mode — recording for the speech-to-text engine")
+    guard startMicrophoneCapture else { return }
+    if let builtIn = preferredPTTInputOverrideDeviceID() {
+      startMicCapture(batchMode: true, overrideDeviceID: builtIn)
+    } else {
+      startMicCapture(batchMode: true)
     }
   }
 
@@ -2405,7 +2436,16 @@ class PushToTalkManager: ObservableObject {
         + "\(commitResult == .accepted ? "committed" : "deferred until its realtime session is ready") after warm wait")
   }
 
-  private func transcribeBufferedWarmWaitAudio() {
+  /// Decodes the buffered turn with the speech-to-text engine and sends the
+  /// text to the chat model.
+  ///
+  /// Reached from three places: the hub warm-wait timeout, a hub commit
+  /// rejection, and Voice Transcript mode. `isFallback` keeps the telemetry
+  /// truthful — a user-pinned mode is not a recovery from a failure.
+  private func transcribeBufferedWarmWaitAudio(
+    source: String = "warm_wait_fallback",
+    isFallback: Bool = true
+  ) {
     batchAudioLock.lock()
     let audio = batchAudioBuffer
     batchAudioLock.unlock()
@@ -2419,7 +2459,7 @@ class PushToTalkManager: ObservableObject {
         holdSec: judgeableHoldSeconds ?? totalSec, totalSec: totalSec, peak: peak)
       recordSilentMicRecoveryOutcome(recoveryDecision.recoveryOutcome)
       DesktopDiagnosticsManager.shared.recordPTTSilentTurn(
-        source: "warm_wait_fallback",
+        source: source,
         mode: finalizedMode,
         audioSeconds: totalSec,
         voicedSeconds: voicedSec,
@@ -2433,7 +2473,7 @@ class PushToTalkManager: ObservableObject {
       pttLifecycle.terminate(
         disposition: resolution.disposition,
         turnKind: .unknown,
-        source: "warm_wait_fallback",
+        source: source,
         peak: peak,
         rms: rms,
         turnAudioSeconds: totalSec,
@@ -2441,7 +2481,7 @@ class PushToTalkManager: ObservableObject {
         judgeable: resolution.judgeable,
         captureStartedLate: resolution.captureStartedLate)
       log(
-        "PushToTalkManager: discarding warm-wait fallback turn (audio \(String(format: "%.2f", totalSec))s, voiced \(String(format: "%.2f", voicedSec))s)"
+        "PushToTalkManager: discarding \(source) turn (audio \(String(format: "%.2f", totalSec))s, voiced \(String(format: "%.2f", voicedSec))s)"
       )
       AnalyticsManager.shared.floatingBarPTTEnded(
         mode: finalizedMode, committed: false, transcriptLength: nil,
@@ -2451,7 +2491,7 @@ class PushToTalkManager: ObservableObject {
       }
       if resolution.captureStartedLate {
         finishCaptureNotReadyPTTTurn(
-          reason: "warm-wait fallback, \(String(format: "%.2f", totalSec))s")
+          reason: "\(source), \(String(format: "%.2f", totalSec))s")
       } else if let turnID = currentVoiceTurnID {
         voiceTurnCoordinator.publish(.finish(turnID: turnID, reason: resolution.terminalReason))
       }
@@ -2465,7 +2505,8 @@ class PushToTalkManager: ObservableObject {
       guard let self, self.voiceTurnCoordinator.activeTurnID == turnID else { return }
       do {
         let language = AssistantSettings.shared.effectiveTranscriptionLanguage
-        self.activeTracer?.begin("batch_transcribe", metadata: ["reason": "hub_warm_timeout"])
+        self.activeTracer?.begin(
+          "batch_transcribe", metadata: ["reason": isFallback ? "hub_warm_timeout" : "user_preference"])
         let batchResult = try await self.batchTranscribeLocalFirst(
           audioData: audio,
           language: language,
@@ -2474,37 +2515,43 @@ class PushToTalkManager: ObservableObject {
         guard self.voiceTurnCoordinator.activeTurnID == turnID else { return }
         self.activeTracer?.end("batch_transcribe")
         log(
-          "PushToTalkManager: warm-wait batch STT selected provider=\(batchResult.provider ?? "unknown") "
+          "PushToTalkManager: \(source) STT selected provider=\(batchResult.provider ?? "unknown") "
             + "model=\(batchResult.model ?? "unknown")")
         let provider = batchResult.provider ?? "unknown"
         let model = batchResult.model ?? "unknown"
-        DesktopDiagnosticsManager.shared.recordFallback(
-          area: "ptt_cascade",
-          from: "hub",
-          to: provider,
-          reason: "timeout",
-          outcome: .recovered,
-          extra: [
-            "stt_provider": provider,
-            "stt_model": model,
-            "user_visible": true,
-          ])
+        if isFallback {
+          DesktopDiagnosticsManager.shared.recordFallback(
+            area: "ptt_cascade",
+            from: "hub",
+            to: provider,
+            reason: "timeout",
+            outcome: .recovered,
+            extra: [
+              "stt_provider": provider,
+              "stt_model": model,
+              "user_visible": true,
+            ])
+        } else {
+          DesktopDiagnosticsManager.shared.recordPTTCommitted(mode: finalizedMode, hubActive: false)
+        }
         if let transcript = batchResult.transcript, !transcript.isEmpty {
           self.transcriptSegments = [transcript]
         }
       } catch {
-        logError("PushToTalkManager: warm-wait fallback transcription failed", error: error)
-        DesktopDiagnosticsManager.shared.recordFallback(
-          area: "ptt_cascade",
-          from: "hub",
-          to: "batch_stt",
-          reason: "timeout",
-          outcome: .exhausted,
-          extra: [
-            "stt_provider": "unknown",
-            "stt_model": "unknown",
-            "user_visible": true,
-          ])
+        logError("PushToTalkManager: \(source) transcription failed", error: error)
+        if isFallback {
+          DesktopDiagnosticsManager.shared.recordFallback(
+            area: "ptt_cascade",
+            from: "hub",
+            to: "batch_stt",
+            reason: "timeout",
+            outcome: .exhausted,
+            extra: [
+              "stt_provider": "unknown",
+              "stt_model": "unknown",
+              "user_visible": true,
+            ])
+        }
         self.voiceTurnCoordinator.publish(
           .transcriptionFailed(turnID: turnID, message: error.localizedDescription))
         return

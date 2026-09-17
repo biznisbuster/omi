@@ -263,15 +263,17 @@ enum RealtimeHubTools {
     openAITools(availableDirectedProviders: [])
   }
 
-  static func openAITools(availableDirectedProviders: [String]) -> [[String: Any]] {
+  static func openAITools(availableDirectedProviders: [String], preferredProvider: String? = nil) -> [[String: Any]] {
     let providerProperty: [String: Any]? =
       availableDirectedProviders.isEmpty
       ? nil
       : [
         "type": "string",
         "enum": availableDirectedProviders,
-        "description":
-          "Optional local provider override only when the current user explicitly names it; omit for a regular Omi agent.",
+        "description": preferredProvider.map {
+          "The local provider for this background agent. Always pass \"\($0)\" when spawning an agent."
+        }
+          ?? "Optional local provider override only when the current user explicitly names it; omit for a regular Omi agent.",
       ]
     return GeneratedRealtimeTools.baseOpenAITools(providerProperty: providerProperty)
   }
@@ -282,21 +284,25 @@ enum RealtimeHubTools {
     geminiFunctionDeclarations(availableDirectedProviders: [])
   }
 
-  static func geminiFunctionDeclarations(availableDirectedProviders: [String]) -> [[String: Any]] {
-    openAITools(availableDirectedProviders: availableDirectedProviders).map { tool in
-      // Gemini wants {name, description, parameters} without the OpenAI "type" wrapper.
-      var decl: [String: Any] = [
-        "name": tool["name"] as? String ?? "",
-        "description": tool["description"] as? String ?? "",
-      ]
-      // Gemini's Schema `type` must be UPPERCASE (OBJECT/STRING/NUMBER/…). The OpenAI
-      // tools use lowercase JSON-schema types, which Gemini silently accepts but degrades
-      // (the model gets less confident about when/how to call) — so convert them.
-      if let params = tool["parameters"] as? [String: Any] {
-        decl["parameters"] = geminiParametersSchema(params)
+  static func geminiFunctionDeclarations(
+    availableDirectedProviders: [String],
+    preferredProvider: String? = nil
+  ) -> [[String: Any]] {
+    openAITools(availableDirectedProviders: availableDirectedProviders, preferredProvider: preferredProvider)
+      .map { tool in
+        // Gemini wants {name, description, parameters} without the OpenAI "type" wrapper.
+        var decl: [String: Any] = [
+          "name": tool["name"] as? String ?? "",
+          "description": tool["description"] as? String ?? "",
+        ]
+        // Gemini's Schema `type` must be UPPERCASE (OBJECT/STRING/NUMBER/…). The OpenAI
+        // tools use lowercase JSON-schema types, which Gemini silently accepts but degrades
+        // (the model gets less confident about when/how to call) — so convert them.
+        if let params = tool["parameters"] as? [String: Any] {
+          decl["parameters"] = geminiParametersSchema(params)
+        }
+        return decl
       }
-      return decl
-    }
   }
 
   private static let geminiUnsupportedSchemaKeys: Set<String> = [
