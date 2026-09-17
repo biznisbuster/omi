@@ -21,11 +21,18 @@ struct LabEvaluation: Identifiable {
 }
 
 struct LabPromptVersion: Identifiable {
-  let id = UUID()
+  /// The code-owned prompt the app ships. It is rebuilt on every launch and is
+  /// never written to the store, so the Lab always has a truthful baseline.
+  static let builtInID = "builtin-current"
+
+  let id: String
   var name: String
   var floatingPrefix: String
   var mainPrompt: String
   var evaluations: [LabEvaluation] = []
+
+  var isBuiltIn: Bool { id == Self.builtInID }
+
   var avgAIScore: Double {
     evaluations.isEmpty ? 0 : Double(evaluations.map(\.aiScore).reduce(0, +)) / Double(evaluations.count)
   }
@@ -77,6 +84,7 @@ class ChatLabViewModel: ObservableObject {
   @Published var expandedHistoryVersion: Int? = nil
 
   let chatProvider: ChatProvider
+  private let promptStore: ChatLabPromptStore
 
   /// User must provide their own Anthropic API key for ChatLab.
   /// Persisted in UserDefaults so they don't have to re-enter each session.
@@ -88,16 +96,12 @@ class ChatLabViewModel: ObservableObject {
     userApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  init(chatProvider: ChatProvider) {
+  init(chatProvider: ChatProvider, promptStore: ChatLabPromptStore = ChatLabPromptStore()) {
     self.chatProvider = chatProvider
+    self.promptStore = promptStore
     self.userApiKey = UserDefaults.standard.string(forKey: "chatlab_anthropic_api_key") ?? ""
     loadDefaultQuestions()
     loadCurrentPrompt()
-    // Load history in background — don't block the UI
-    Task.detached(priority: .background) { [weak self] in
-      guard let self else { return }
-      await self.loadPromptHistory()
-    }
   }
 
   func loadDefaultQuestions() {
@@ -336,17 +340,62 @@ class ChatLabViewModel: ObservableObject {
       databaseSchema: "{database_schema}"
     )
 
-    editingFloatingPrefix = floatingPrefix
-    editingMainPrompt = mainPrompt
-
-    if versions.isEmpty {
-      versions.append(
-        LabPromptVersion(
-          name: "v1 (current)",
-          floatingPrefix: floatingPrefix,
-          mainPrompt: mainPrompt
-        ))
+    let builtIn = LabPromptVersion(
+      id: LabPromptVersion.builtInID,
+      name: "v1 (current)",
+      floatingPrefix: floatingPrefix,
+      mainPrompt: mainPrompt
+    )
+    // Saved versions survive relaunches; the built-in one is code-owned and is
+    // rebuilt above on every launch so it cannot drift from what ships.
+    let saved = promptStore.loadVersions().map { record in
+      LabPromptVersion(
+        id: record.id,
+        name: record.name,
+        floatingPrefix: record.floatingPrefix,
+        mainPrompt: record.mainPrompt
+      )
     }
+    versions = [builtIn] + saved
+
+    let activeID = promptStore.activeVersionID ?? LabPromptVersion.builtInID
+    selectedVersionIndex = versions.firstIndex(where: { $0.id == activeID }) ?? 0
+    editingFloatingPrefix = versions[selectedVersionIndex].floatingPrefix
+    editingMainPrompt = versions[selectedVersionIndex].mainPrompt
+  }
+
+  /// The active version is the prompt under test: "Run All Questions" and the
+  /// evaluation table are about this version, and the choice survives
+  /// relaunches. Activating the built-in clears the stored choice.
+  func activateVersion(at index: Int) {
+    guard versions.indices.contains(index) else { return }
+    selectedVersionIndex = index
+    let version = versions[index]
+    promptStore.activeVersionID = version.isBuiltIn ? nil : version.id
+    editingFloatingPrefix = version.floatingPrefix
+    editingMainPrompt = version.mainPrompt
+  }
+
+  /// Editor text is the version's content, so edits to a saved version are
+  /// stored as they are typed — switching versions or relaunching no longer
+  /// drops them. The built-in prompt is code-owned: edits to it stay a scratch
+  /// draft until "Save as New Version" pins them.
+  func editorDidChange(floatingPrefix: String, mainPrompt: String) {
+    guard versions.indices.contains(selectedVersionIndex) else { return }
+    guard !versions[selectedVersionIndex].isBuiltIn else { return }
+    versions[selectedVersionIndex].floatingPrefix = floatingPrefix
+    versions[selectedVersionIndex].mainPrompt = mainPrompt
+    persist(versions[selectedVersionIndex])
+  }
+
+  private func persist(_ version: LabPromptVersion) {
+    promptStore.upsert(
+      ChatLabSavedPrompt(
+        id: version.id,
+        name: version.name,
+        floatingPrefix: version.floatingPrefix,
+        mainPrompt: version.mainPrompt
+      ))
   }
 
   func runAllQuestions() async {
@@ -446,14 +495,14 @@ class ChatLabViewModel: ObservableObject {
 
     if !newPrompt.isEmpty {
       let newVersion = LabPromptVersion(
+        id: UUID().uuidString,
         name: "v\(versions.count + 1)",
         floatingPrefix: currentVersion.floatingPrefix,
         mainPrompt: newPrompt
       )
       versions.append(newVersion)
-      selectedVersionIndex = versions.count - 1
-      editingFloatingPrefix = newVersion.floatingPrefix
-      editingMainPrompt = newVersion.mainPrompt
+      persist(newVersion)
+      activateVersion(at: versions.count - 1)
     }
 
     isGenerating = false
@@ -461,12 +510,16 @@ class ChatLabViewModel: ObservableObject {
 
   func saveAsNewVersion(name: String) {
     let newVersion = LabPromptVersion(
+      id: UUID().uuidString,
       name: name,
       floatingPrefix: editingFloatingPrefix,
       mainPrompt: editingMainPrompt
     )
     versions.append(newVersion)
-    selectedVersionIndex = versions.count - 1
+    persist(newVersion)
+    // Saving a version is the user saying "this is the one I'm iterating on":
+    // it becomes the active prompt instead of silently sitting unused.
+    activateVersion(at: versions.count - 1)
   }
 
   private func callClaude(systemPrompt: String, userMessage: String) async -> (String, Int, String) {
@@ -608,6 +661,11 @@ struct ChatLabView: View {
     // The panel grounds the page (the window itself is transparent); `glassContent()` also pins
     // the panel's light appearance, without which `Ink`'s ladder resolves up on a Dark Mac.
     .glassContent()
+    .task {
+      // Production history is git + backend work; load it off the first paint
+      // instead of the view model's initializer.
+      await vm.loadPromptHistory()
+    }
     .onExitCommand { onClose?() }
   }
 
@@ -798,7 +856,12 @@ struct ChatLabView: View {
 
         Spacer()
 
-        // Version picker
+        // The picker is the active-prompt selector — the one prompt evaluations
+        // run against — and the choice is persisted with the saved versions.
+        Text("Active prompt")
+          .scaledFont(size: OmiType.caption, weight: .medium)
+          .foregroundColor(Ink.secondary)
+
         Picker("", selection: $vm.selectedVersionIndex) {
           ForEach(vm.versions.indices, id: \.self) { i in
             Text(vm.versions[i].name).tag(i)
@@ -806,12 +869,20 @@ struct ChatLabView: View {
         }
         .pickerStyle(.menu)
         .frame(width: 180)
+        .accessibilityIdentifier("chatlab.active_prompt_picker")
         .onChange(of: vm.selectedVersionIndex) { _, idx in
-          if idx < vm.versions.count {
-            vm.editingFloatingPrefix = vm.versions[idx].floatingPrefix
-            vm.editingMainPrompt = vm.versions[idx].mainPrompt
-          }
+          vm.activateVersion(at: idx)
         }
+      }
+
+      if vm.versions.indices.contains(vm.selectedVersionIndex) {
+        Text(
+          vm.versions[vm.selectedVersionIndex].isBuiltIn
+            ? "Evaluations run against the active prompt. Built-in (current) mirrors the prompt compiled into the app — edits here are a scratch draft until you use Save as New Version."
+            : "Evaluations run against the active prompt, and it is kept across launches. Production chat still uses the prompt compiled into the app; land a winning version in code to change it."
+        )
+        .scaledFont(size: OmiType.caption)
+        .foregroundColor(Ink.secondary)
       }
 
       // Anthropic API key (user must provide their own)
@@ -848,6 +919,9 @@ struct ChatLabView: View {
           .frame(height: 100)
           .padding(OmiSpacing.sm)
           .glassField()
+          .onChange(of: vm.editingFloatingPrefix) { _, value in
+            vm.editorDidChange(floatingPrefix: value, mainPrompt: vm.editingMainPrompt)
+          }
       }
 
       // Main prompt
@@ -864,6 +938,9 @@ struct ChatLabView: View {
           .frame(height: 200)
           .padding(OmiSpacing.sm)
           .glassField()
+          .onChange(of: vm.editingMainPrompt) { _, value in
+            vm.editorDidChange(floatingPrefix: vm.editingFloatingPrefix, mainPrompt: value)
+          }
       }
 
       HStack(spacing: OmiSpacing.md) {
@@ -1073,6 +1150,19 @@ struct ChatLabView: View {
                 Text(v.name)
                   .scaledFont(size: OmiType.body, weight: .semibold)
                   .foregroundColor(Ink.primary)
+
+                if i == vm.selectedVersionIndex {
+                  Text("Active")
+                    .scaledFont(size: OmiType.micro, weight: .semibold)
+                    .foregroundColor(Ink.listeningGreen)
+                } else {
+                  Button("Activate") {
+                    vm.activateVersion(at: i)
+                  }
+                  .buttonStyle(OmiButtonStyle(.secondary, size: .compact))
+                  .accessibilityIdentifier("chatlab.activate_version_\(i)")
+                }
+
                 HStack(spacing: OmiSpacing.md) {
                   VStack(spacing: OmiSpacing.hairline) {
                     Text("AI")
