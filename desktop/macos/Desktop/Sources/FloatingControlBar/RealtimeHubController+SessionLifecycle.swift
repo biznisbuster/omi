@@ -547,24 +547,6 @@ extension RealtimeHubController {
       ensureWarm()
       return
     }
-    // Client-direct Live starts are budgeted: each one re-sends the whole hub
-    // context (~23k tokens) and the provider meters Live usage in tokens per
-    // minute. Four starts inside a minute was ~92k against a 65k budget, and the
-    // next start was closed with `1011 quota`. Managed sessions ride Omi's own
-    // minted token, so the budget covers the user's key only.
-    if auth.isClientDirect, !liveSessionStartBudget.canStart(now: Date()) {
-      log(
-        "RealtimeHub: session start deferred — \(Int(liveSessionStartBudget.remainingWait(now: Date())))s of the Live start budget left"
-      )
-      DesktopDiagnosticsManager.shared.recordFallback(
-        area: "realtime_hub",
-        from: "live_session_start",
-        to: "cascade",
-        reason: "start_budget",
-        outcome: .degraded,
-        extra: ["user_visible": false])
-      return
-    }
     let topLevelContext = voiceSessionContext(for: ownerScope)
     guard RealtimeWarmSessionStartPolicy.canStart(requirementIsResolved: topLevelContext.isResolved) else {
       log("RealtimeHub: session start deferred until voice context resolves")
@@ -606,9 +588,6 @@ extension RealtimeHubController {
     lastWarmAt = nil
     hubConnected = false
     session = s
-    if auth.isClientDirect {
-      liveSessionStartBudget.recordStart(now: Date())
-    }
     voiceSessionID = VoiceSessionID()
     sessionProvider = provider
     sessionAuth = auth

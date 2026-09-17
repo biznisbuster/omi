@@ -2566,6 +2566,23 @@ final class DesktopAutomationActionRegistry {
     }
 
     register(
+      name: "stop_chat_turn",
+      summary: "Stop the turn running on the shared chat timeline (the composer's Stop button)",
+      category: "chat",
+      surfaces: ["chat", "floating_bar"],
+      safety: "local_ui_state",
+      sideEffects: ["cancels the in-flight chat turn, keeping partial output"]
+    ) { _ in
+      await MainActor.run { () -> [String: String] in
+        guard let provider = ChatProvider.mainInstance else {
+          return ["stopped": "false", "reason": "no_chat_provider"]
+        }
+        let stopped = provider.stopVisibleTurn()
+        return ["stopped": stopped ? "true" : "false"]
+      }
+    }
+
+    register(
       name: "open_chat_lab",
       summary: "Open the Chat Prompt Lab window (Settings → AI & Automation → Developer Tools)",
       category: "dev_tools",

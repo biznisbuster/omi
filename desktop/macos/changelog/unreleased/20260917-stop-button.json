@@ -1,0 +1,1 @@
+{"change": "Fixed the composer's Stop button doing nothing while a voice-owned turn was running — the stop now targets whichever turn is on the shared timeline"}

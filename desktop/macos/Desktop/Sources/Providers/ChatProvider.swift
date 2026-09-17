@@ -3701,6 +3701,28 @@ class ChatProvider: ObservableObject {
     stopAgent(owner: owner, reason: .userStop)
   }
 
+  /// Whether the turn visible on the shared timeline can be stopped.
+  ///
+  /// The chat-first shell shows one timeline (INV-6), so the running turn may be
+  /// owned by the voice lane. `stopAgent(owner: .mainChat)` refused exactly that
+  /// stop ("ignoring stop from non-owner turn") and the composer's stop button
+  /// read as dead while a voice turn kept running.
+  var canStopVisibleTurn: Bool {
+    ChatVisibleStopPolicy.canStop(isSending: isSending, activeOwner: activeTurnOwner)
+  }
+
+  /// Stops whichever turn is running on the shared timeline, whichever surface
+  /// started it. The UI stop belongs to the timeline, not to one surface's lane.
+  @discardableResult
+  func stopVisibleTurn(reason: ChatTurnStopReason = .userStop) -> Bool {
+    guard isSending else { return false }
+    guard let owner = ChatVisibleStopPolicy.stopTarget(activeOwner: activeTurnOwner) else {
+      log("ChatProvider: visible-turn stop ignored — no recorded active owner")
+      return false
+    }
+    return stopAgent(owner: owner, reason: reason)
+  }
+
   @discardableResult
   func stopAgent(owner: ChatTurnOwner, reason: ChatTurnStopReason) -> Bool {
     guard isSending else { return false }

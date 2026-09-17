@@ -288,7 +288,10 @@ struct QueryShellHome: View {
       mode: mode,
       attachments: chatProvider.pendingAttachments,
       onAsk: ask,
-      onStop: { chatProvider.stopAgent(owner: .mainChat) },
+      // The timeline's stop, not the main-chat lane's: a voice-owned turn is
+      // still the turn the user is looking at, and refusing that stop made the
+      // composer's button do nothing (see `stopVisibleTurn`).
+      onStop: { _ = chatProvider.stopVisibleTurn() },
       onAttachmentsAdded: stageAttachments,
       onAttachmentRemoved: { chatProvider.removePendingAttachment(id: $0) },
       onPasteAttachments: stagePasteboardAttachments,

@@ -1,0 +1,1 @@
+{"change": "Removed the realtime session-start throttle; a provider quota failure still pauses that key for a minute after the error, but nothing pre-emptively blocks a Live session"}

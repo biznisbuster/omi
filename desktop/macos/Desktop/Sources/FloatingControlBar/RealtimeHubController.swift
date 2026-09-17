@@ -366,24 +366,12 @@ final class RealtimeHubController: NSObject, RealtimeHubSessionDelegate {
   var presenceIdleProvider: () -> TimeInterval? = { UserInputPresence.secondsSinceLastInput() }
 
   var fallbackProvider: RealtimeHubProvider?
-  /// Client-direct Live sessions re-send the whole hub context per start, and the
-  /// provider meters Live usage in tokens per minute; see `LiveSessionStartBudget`.
-  var liveSessionStartBudget = LiveSessionStartBudget()
-
   /// Model override for the next client-direct session start: set when the
   /// provider rejected the selected model (policy close) so the retry uses the
   /// provider's native-audio dialogue model instead of the whole key dying.
   var modelFallbackOverride: String?
   /// One fallback-model attempt per successful connect / selection change.
   var usedModelFallback = false
-
-  /// Whether a same-provider session restart is affordable right now. Barge-in
-  /// replacements re-send the whole context; when the start budget is spent the
-  /// imperfect in-session interrupt (already the OpenAI path) beats losing
-  /// realtime voice to a quota close on the next start.
-  func canRestartLiveSession(now: Date = Date()) -> Bool {
-    liveSessionStartBudget.canStart(now: now)
-  }
 
   /// Retries the same provider with its designated fallback model, once per
   /// selection, for failures that say "this model", not "this key".
