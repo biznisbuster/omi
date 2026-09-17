@@ -1362,10 +1362,23 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
   /// This is the cloud voice that works without an OpenAI key, which is the
   /// whole point: the voice picker used to offer OpenAI voices that silently
   /// fell back to the system voice when no OpenAI key existed.
+  /// The speech model the user chose for the Gemini provider, with its
+  /// fallbacks. The picker in Voice & Models writes the key.
+  nonisolated static let geminiTTSModelDefaultsKey = "speechGeminiTTSModel"
+  nonisolated static let geminiTTSModelOptions = [
+    "gemini-3.1-flash-tts-preview",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
+  ]
   nonisolated static let geminiTTSModels = [
     "gemini-3.1-flash-tts-preview",
     "gemini-2.5-flash-preview-tts",
   ]
+
+  nonisolated static var selectedGeminiTTSModel: String {
+    let stored = UserDefaults.standard.string(forKey: geminiTTSModelDefaultsKey) ?? ""
+    return geminiTTSModelOptions.contains(stored) ? stored : geminiTTSModelOptions[0]
+  }
 
   private nonisolated static func synthesizeGeminiSpeech(
     text: String,
@@ -1395,7 +1408,11 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       domain: "omi.gemini.tts",
       code: 1,
       userInfo: [NSLocalizedDescriptionKey: "Gemini TTS produced no audio."])
-    for model in geminiTTSModels {
+    // The chosen model first, then the remaining options so a retired preview
+    // model cannot silence the voice entirely.
+    var models = [selectedGeminiTTSModel]
+    models.append(contentsOf: geminiTTSModels.filter { $0 != selectedGeminiTTSModel })
+    for model in models {
       // The key travels in the documented header, never in a URL that could be
       // logged or cached.
       guard

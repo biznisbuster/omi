@@ -423,9 +423,59 @@ extension SettingsContentView {
               .foregroundColor(Ink.secondary)
           }
           Spacer()
-          SettingsMenuPicker(selection: $shortcutSettings.selectedVoiceID) {
-            ForEach(ShortcutSettings.availableVoices) { voice in
-              Text(voice.name).tag(voice.id)
+          Button("Play sample") {
+            FloatingBarVoicePlaybackService.shared.playVoiceSample(
+              voiceID: shortcutSettings.selectedVoiceID)
+          }
+          .buttonStyle(OmiButtonStyle(.primary, size: .compact))
+          .accessibilityIdentifier("floatingbar.voice_sample")
+        }
+
+        // The speech lane's own provider and model. One place answers "which
+        // provider, which model, which voice speaks?", independently of what
+        // transcribes or answers.
+        VStack(alignment: .leading, spacing: OmiSpacing.sm) {
+          HStack {
+            Text("Provider")
+              .scaledFont(size: OmiType.caption, weight: .medium)
+              .foregroundColor(Ink.primary)
+            Spacer()
+            // The macOS system voice stays a fallback, never a picker entry
+            // (the pinned fallback chain owns it), so the provider list is
+            // exactly the three speech services.
+            SettingsMenuPicker(selection: speechProviderBinding) {
+              Text("Gemini (your key)").tag("gemini")
+              Text("OpenAI (needs a key)").tag("openai")
+              Text("On-device Piper (Serbian)").tag("piper")
+            }
+            .accessibilityIdentifier("floatingbar.speech_provider")
+          }
+
+          if ShortcutSettings.provider(for: shortcutSettings.selectedVoiceID) == .geminiTTS {
+            HStack {
+              Text("Model")
+                .scaledFont(size: OmiType.caption, weight: .medium)
+                .foregroundColor(Ink.primary)
+              Spacer()
+              SettingsMenuPicker(selection: $speechGeminiTTSModel) {
+                ForEach(FloatingBarVoicePlaybackService.geminiTTSModelOptions, id: \.self) {
+                  model in
+                  Text(model).tag(model)
+                }
+              }
+              .accessibilityIdentifier("floatingbar.speech_model")
+            }
+          }
+
+          HStack {
+            Text("Voice")
+              .scaledFont(size: OmiType.caption, weight: .medium)
+              .foregroundColor(Ink.primary)
+            Spacer()
+            SettingsMenuPicker(selection: $shortcutSettings.selectedVoiceID) {
+              ForEach(voicesForSelectedProvider) { voice in
+                Text(voice.name).tag(voice.id)
+              }
             }
           }
         }
@@ -487,6 +537,36 @@ extension SettingsContentView {
       }
       Spacer()
     }
+  }
+
+  /// The voices the picker offers for the provider the user already chose.
+  private var voicesForSelectedProvider: [ShortcutSettings.VoiceOption] {
+    let provider = ShortcutSettings.provider(for: shortcutSettings.selectedVoiceID)
+    return ShortcutSettings.availableVoices.filter { $0.provider == provider }
+  }
+
+  /// Provider picker: choosing one keeps a voice from that provider selected,
+  /// so the lane is never left pointing at a provider the user moved off.
+  private var speechProviderBinding: Binding<String> {
+    Binding(
+      get: {
+        switch ShortcutSettings.provider(for: shortcutSettings.selectedVoiceID) {
+        case .geminiTTS: return "gemini"
+        case .openAI: return "openai"
+        case .localPiper: return "piper"
+        case .localSystem: return "system"
+        }
+      },
+      set: { newValue in
+        let provider: ShortcutSettings.VoiceOption.Provider
+        switch newValue {
+        case "gemini": provider = .geminiTTS
+        case "openai": provider = .openAI
+        case "piper": provider = .localPiper
+        default: provider = .localSystem
+        }
+        shortcutSettings.selectedVoiceID = ShortcutSettings.defaultVoiceID(for: provider)
+      })
   }
 
   /// The exact speech model behind the selected voice, so "which model is

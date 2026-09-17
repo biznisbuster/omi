@@ -5704,6 +5704,38 @@ class FloatingControlBarManager {
     }
   }
 
+  /// The assistant row that answers this voice turn.
+  ///
+  /// `clientTurnId` is the primary identity, but a journal-projected answer row
+  /// can lose it (observed live: the answer carried no clientTurnId while the
+  /// user row kept it), and the voice lane then neither streamed nor spoke the
+  /// reply. Fall back to the deterministic id the send assigned, then to the
+  /// newest assistant row created after this turn was dispatched.
+  static func voiceAnswerMessage(
+    in provider: ChatProvider,
+    clientTurnId: String,
+    since: Date
+  ) -> ChatMessage? {
+    if let exact = provider.messages.last(where: {
+      $0.clientTurnId == clientTurnId && $0.sender == .ai
+    }) {
+      return exact
+    }
+    let deterministicID = ChatProvider.messageIds(forAttemptId: clientTurnId).assistant
+    if let byId = provider.messages.last(where: { $0.id == deterministicID && $0.sender == .ai }) {
+      log("FloatingControlBarWindow: voice answer bound by deterministic id (no clientTurnId on the row)")
+      return byId
+    }
+    guard
+      let fallback = provider.messages.last(where: {
+        $0.sender == .ai && $0.createdAt >= since
+          && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      })
+    else { return nil }
+    log("FloatingControlBarWindow: voice answer bound by recency (journal row without clientTurnId)")
+    return fallback
+  }
+
   private func sendVoiceOnlyQuery(
     _ message: String,
     barWindow: FloatingControlBarWindow,
@@ -5771,15 +5803,15 @@ class FloatingControlBarManager {
     let voiceTranscription = pendingVoiceTranscription
     pendingVoiceTranscription = nil
     let clientTurnId = UUID().uuidString
+    let voiceTurnDispatchedAt = Date()
     chatCancellable?.cancel()
     chatCancellable = provider.$messages
       .receive(on: DispatchQueue.main)
       .sink { [weak self] messages in
         guard let self, self.isActiveQueryGeneration(generation) else { return }
         guard
-          let aiMessage = messages.last(where: {
-            $0.clientTurnId == clientTurnId && $0.sender == .ai
-          })
+          let aiMessage = Self.voiceAnswerMessage(
+            in: provider, clientTurnId: clientTurnId, since: voiceTurnDispatchedAt)
         else { return }
         FloatingBarVoicePlaybackService.shared.updateStreamingResponseIfEnabled(
           aiMessage,
@@ -5827,9 +5859,9 @@ class FloatingControlBarManager {
     }
 
     guard isActiveQueryGeneration(generation) else { return }
-    if let finalAIMessage = provider.messages.last(where: {
-      $0.clientTurnId == clientTurnId && $0.sender == .ai
-    }) {
+    if let finalAIMessage = Self.voiceAnswerMessage(
+      in: provider, clientTurnId: clientTurnId, since: voiceTurnDispatchedAt)
+    {
       await consumeInterjectVoiceReplyAsync(finalAIMessage.text)
       FloatingBarVoicePlaybackService.shared.updateStreamingResponseIfEnabled(finalAIMessage, isFinal: true)
       if journalAccepted == false {

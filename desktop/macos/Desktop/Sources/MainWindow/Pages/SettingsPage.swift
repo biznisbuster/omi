@@ -369,6 +369,8 @@ struct SettingsContentView: View {
   var pttDictationTranscriptionPreference: String =
     PTTDictationTranscriptionPreference.sameAsTranscription.rawValue
   @AppStorage(TranscriptEngineClient.baseURLDefaultsKey) var transcriptEngineBaseURL: String = ""
+  @AppStorage(FloatingBarVoicePlaybackService.geminiTTSModelDefaultsKey)
+  var speechGeminiTTSModel: String = FloatingBarVoicePlaybackService.geminiTTSModelOptions[0]
   @AppStorage(PTTVoiceMode.defaultsKey) var pttVoiceMode: String = PTTVoiceMode.live.rawValue
   @AppStorage(RealtimeHubVoicePolicy.geminiVoiceDefaultsKey) var realtimeGeminiVoice: String =
     RealtimeHubVoicePolicy.defaultGeminiVoice

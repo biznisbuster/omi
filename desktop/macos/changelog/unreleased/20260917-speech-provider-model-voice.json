@@ -1,0 +1,3 @@
+{
+  "change": "Voice replies now announce themselves: the spoken answer binds even when the journal row loses its turn id (the cause of silent replies), and the Spoken Voice card has explicit Provider / Model / Voice pickers with a Play sample button, so which provider and which speech model reads answers is a setting instead of a guess"
+}

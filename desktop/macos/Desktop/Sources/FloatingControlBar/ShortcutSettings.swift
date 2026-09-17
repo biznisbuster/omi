@@ -693,6 +693,17 @@ class ShortcutSettings: ObservableObject {
 
   static let defaultVoiceID = openAIShimmerVoiceID
 
+  /// The provider a voice id belongs to.
+  static func provider(for id: String) -> VoiceOption.Provider {
+    voiceOption(for: id).provider
+  }
+
+  /// The first voice the picker offers for a provider, used when the user
+  /// switches the speech provider without naming a new voice.
+  static func defaultVoiceID(for provider: VoiceOption.Provider) -> String {
+    availableVoices.first(where: { $0.provider == provider })?.id ?? defaultVoiceID
+  }
+
   static func voiceOption(for id: String) -> VoiceOption {
     availableVoices.first(where: { $0.id == id })
       ?? availableVoices.first(where: { $0.id == defaultVoiceID })
