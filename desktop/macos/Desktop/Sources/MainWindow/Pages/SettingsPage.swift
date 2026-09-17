@@ -367,7 +367,7 @@ struct SettingsContentView: View {
     PTTTranscriptionPreference.automatic.rawValue
   @AppStorage(PTTDictationTranscriptionPreference.defaultsKey)
   var pttDictationTranscriptionPreference: String =
-    PTTDictationTranscriptionPreference.automatic.rawValue
+    PTTDictationTranscriptionPreference.sameAsTranscription.rawValue
   @AppStorage(TranscriptEngineClient.baseURLDefaultsKey) var transcriptEngineBaseURL: String = ""
   @AppStorage(PTTVoiceMode.defaultsKey) var pttVoiceMode: String = PTTVoiceMode.live.rawValue
   @AppStorage(BackgroundAgentProvider.defaultsKey) var backgroundAgentProvider: String =
