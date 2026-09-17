@@ -252,6 +252,22 @@ import XCTest
   }
 
   @MainActor
+  func testUnreadableCanonicalRunStopsThePollInsteadOfSpinningForever() {
+    XCTAssertFalse(
+      AgentPillLifecycleConvergencePolicy.shouldAbandonPoll(consecutiveFailures: 0),
+      "a healthy run must keep polling")
+    XCTAssertFalse(
+      AgentPillLifecycleConvergencePolicy.shouldAbandonPoll(
+        consecutiveFailures: AgentPillLifecycleConvergencePolicy.maximumConsecutiveInspectionFailures
+          - 1),
+      "a transient inspection error is retried")
+    XCTAssertTrue(
+      AgentPillLifecycleConvergencePolicy.shouldAbandonPoll(
+        consecutiveFailures: AgentPillLifecycleConvergencePolicy.maximumConsecutiveInspectionFailures),
+      "an unreadable run must terminalize so the pill stops its running glow")
+  }
+
+  @MainActor
   func testTerminalListProjectionWaitsForCanonicalDetailBeforeJournalizingExactOutput() {
     let statusOnly = AgentPillTerminalJournalMaterializationPolicy.decision(
       status: .done,

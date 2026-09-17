@@ -1,0 +1,3 @@
+{
+  "change": "Fixed a voice request sometimes starting two background agents and leaving the floating bar spinning on a stuck agent that couldn't be read"
+}

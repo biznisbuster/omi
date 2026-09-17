@@ -129,6 +129,12 @@ struct RealtimeSpawnJournalReceipt: Equatable {
 enum RealtimeSpawnAgentToolOutcome: Equatable {
   case accepted(RealtimeSpawnJournalReceipt)
   case setupNeeded(AgentPillsManager.DirectedProvider)
+  /// The kernel reported a failure but its canonical result envelope records a
+  /// *succeeded* invocation: the child may exist even though no parseable
+  /// child receipt came with it (an oversized or malformed compaction). The
+  /// turn must not invite a retry — a second call would create a second child
+  /// for one spoken request.
+  case indeterminate
   case rejected
 
   static func classify(output: String, expectedContinuityKey: String) -> Self {
@@ -140,15 +146,68 @@ enum RealtimeSpawnAgentToolOutcome: Equatable {
     }
     guard
       let data = output.data(using: .utf8),
-      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-      let error = payload["error"] as? [String: Any],
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return .rejected }
+    if let error = payload["error"] as? [String: Any],
       error["code"] as? String == "provider_setup_needed",
       let rawProvider = error["provider"] as? String,
       let provider = AgentPillsManager.DirectedProvider(rawValue: rawProvider)
-    else {
-      return .rejected
+    {
+      return .setupNeeded(provider)
     }
-    return .setupNeeded(provider)
+    if payload["ok"] as? Bool == false,
+      let envelope = payload["toolResultEnvelope"] as? [String: Any],
+      envelope["status"] as? String == "succeeded"
+    {
+      return .indeterminate
+    }
+    return .rejected
+  }
+}
+
+/// At most one `spawn_agent` may create a child run for a given voice turn.
+///
+/// Providers are allowed to emit more than one function call for one spoken
+/// request (Gemini synthesizes an id per call), and a mid-turn tool-tracking
+/// reset re-opens the same call to the dedupe guard because its key includes
+/// the turn epoch. Each admitted call reached the kernel and created its own
+/// child — two pills, two agents, one spoken request. This policy makes the
+/// turn the dedupe unit: the first call claims it, every later call is a
+/// duplicate until the attempt finishes without an accepted child.
+///
+/// A *rejected* or failed attempt deliberately releases the claim so the
+/// bounded `RealtimeSpawnFailureContinuationPolicy` retry (another installed
+/// agent, or the Omi default) can still run in the same turn.
+struct RealtimeSpawnSingleFlightPolicy {
+  enum Claim: Equatable {
+    /// No spawn has been admitted for this turn; the caller owns the attempt.
+    case start
+    /// This turn is still starting an agent or already spawned one.
+    case duplicate
+  }
+
+  private var claimedTurnIDs: Set<UUID> = []
+
+  /// Upper bound on remembered turns. A voice turn id is never reused, so a
+  /// full reset can only ever forget finished turns.
+  private static let maximumRememberedTurns = 64
+
+  mutating func claim(turnID: UUID) -> Claim {
+    guard !claimedTurnIDs.contains(turnID) else { return .duplicate }
+    if claimedTurnIDs.count >= Self.maximumRememberedTurns {
+      claimedTurnIDs.removeAll()
+    }
+    claimedTurnIDs.insert(turnID)
+    return .start
+  }
+
+  /// The attempt ended without an accepted child, so the bounded retry may run.
+  mutating func release(turnID: UUID) {
+    claimedTurnIDs.remove(turnID)
+  }
+
+  func hasClaim(turnID: UUID) -> Bool {
+    claimedTurnIDs.contains(turnID)
   }
 }
 

@@ -422,6 +422,9 @@ extension RealtimeHubController {
             }
           case .setupNeeded(let provider):
             self.lastExternalToolErrorCode = "provider_setup_needed"
+            // No child run exists yet — free the turn so the bounded
+            // continuation can retry with another installed agent.
+            self.spawnSingleFlightPolicy.release(turnID: turnID.rawValue)
             let continueTurn = self.spawnFailureContinuationPolicy.beginContinuationIfAllowed(
               turnID: turnID.rawValue,
               failedProvider: provider.rawValue)
@@ -438,8 +441,31 @@ extension RealtimeHubController {
               VoiceTurnCoordinator.shared.publish(.finish(turnID: turnID, reason: .providerFailed))
             }
             return
+          case .indeterminate:
+            // The kernel's own envelope says the invocation succeeded but no
+            // parseable child receipt came with it, so a child may already be
+            // running. Keep the single-flight claim: a retry here would create
+            // the second agent this guard exists to prevent.
+            self.lastExternalToolErrorCode = "realtime_spawn_indeterminate"
+            log(
+              "RealtimeHub[\(self.providerTag)]: spawn_agent result was unreadable over a succeeded canonical envelope; keeping the single-flight claim"
+            )
+            self.sendToolResultIfCurrent(
+              source: source,
+              callId: callId,
+              name: name,
+              output: RealtimeProviderToolResultPolicy.rejectedOutput(
+                code: "realtime_spawn_indeterminate",
+                message:
+                  "A background agent may already be running for this request. Do not call spawn_agent again — tell the user it is running.",
+                preservingCanonicalEnvelopeFrom: output),
+              expectedTurnEpoch: expectedTurnEpoch)
+            return
           case .accepted, .rejected:
             log("RealtimeHub[\(self.providerTag)]: spawn_agent rejected without a canonical child receipt")
+            // The kernel did not create a child for this attempt, so the turn's
+            // single-flight claim is free for the one allowed retry.
+            self.spawnSingleFlightPolicy.release(turnID: turnID.rawValue)
             let continueTurn = self.spawnFailureContinuationPolicy.beginContinuationIfAllowed(
               turnID: turnID.rawValue,
               failedProvider: requestedProvider)
@@ -487,6 +513,30 @@ extension RealtimeHubController {
         self.lastExternalToolName = name
         self.lastExternalToolErrorCode = code
         log("RealtimeHub[\(self.providerTag)]: kernel rejected tool \(name) code=\(code)")
+        if name == HubTool.spawnAgent.rawValue {
+          // A thrown authorization failure used to answer "Please try again"
+          // without consulting the continuation policy, so a model could keep
+          // re-issuing the same spawn while the bar stayed in its starting
+          // state. Same one-retry bound as a classified rejection.
+          self.spawnSingleFlightPolicy.release(turnID: turnID.rawValue)
+          let continueTurn = self.spawnFailureContinuationPolicy.beginContinuationIfAllowed(
+            turnID: turnID.rawValue,
+            failedProvider: nil)
+          self.sendToolResultIfCurrent(
+            source: source,
+            callId: callId,
+            name: name,
+            output: RealtimeProviderToolResultPolicy.rejectedOutput(
+              code: code,
+              message: continueTurn
+                ? "The background agent could not start. You may retry once, or tell the user it failed."
+                : "The background agent could not start. Tell the user it failed."),
+            expectedTurnEpoch: expectedTurnEpoch)
+          if !continueTurn {
+            VoiceTurnCoordinator.shared.publish(.finish(turnID: turnID, reason: .providerFailed))
+          }
+          return
+        }
         self.sendToolResultIfCurrent(
           source: source,
           callId: callId,
@@ -956,6 +1006,25 @@ extension RealtimeHubController {
         source: source,
         callId: callId,
         arguments: arguments,
+        expectedTurnEpoch: toolTurnEpoch)
+      return
+    }
+    if name == HubTool.spawnAgent.rawValue,
+      spawnSingleFlightPolicy.claim(turnID: turnID.rawValue) == .duplicate
+    {
+      // The model often repeats the call for one spoken request (or re-emits it
+      // after a transport hiccup). Answer the duplicate locally so it can tell
+      // the user the agent is already starting instead of creating a second run.
+      log("RealtimeHub[\(providerTag)]: dropping duplicate spawn_agent for the active turn")
+      sendToolResultIfCurrent(
+        source: source,
+        callId: callId,
+        name: name,
+        output: RealtimeProviderToolResultPolicy.rejectedOutput(
+          code: "realtime_spawn_duplicate",
+          message:
+            "A background agent for this request is already starting — do not start another. Tell the user it is running."
+        ),
         expectedTurnEpoch: toolTurnEpoch)
       return
     }

@@ -160,6 +160,9 @@ final class RealtimeHubController: NSObject, RealtimeHubSessionDelegate {
   /// One bounded same-turn recovery after a failed spawn. The first failure
   /// returns typed guidance to the provider; a repeat closes the turn.
   var spawnFailureContinuationPolicy = RealtimeSpawnFailureContinuationPolicy()
+  /// One `spawn_agent` child per voice turn. Duplicate provider calls for the
+  /// same spoken request are answered locally instead of creating a second run.
+  var spawnSingleFlightPolicy = RealtimeSpawnSingleFlightPolicy()
   let legacyVoiceJournalImportStore = LegacyVoiceJournalImportStore.shared
   var legacyVoiceJournalImportTask: Task<Void, Never>?
   var legacyVoiceJournalImportedOwners = Set<String>()

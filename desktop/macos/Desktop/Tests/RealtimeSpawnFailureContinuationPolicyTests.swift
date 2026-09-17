@@ -46,4 +46,59 @@ final class RealtimeSpawnFailureContinuationPolicyTests: XCTestCase {
 
     XCTAssertNil(policy.takeFailedProvider(turnID: turn))
   }
+
+  // MARK: - Single-flight spawn
+
+  func testSecondSpawnInTheSameTurnIsADuplicate() {
+    var policy = RealtimeSpawnSingleFlightPolicy()
+    let turn = UUID()
+
+    XCTAssertEqual(policy.claim(turnID: turn), .start)
+    XCTAssertEqual(
+      policy.claim(turnID: turn), .duplicate,
+      "one spoken request must not create a second child run")
+  }
+
+  func testDistinctTurnsEachGetTheirOwnSpawn() {
+    var policy = RealtimeSpawnSingleFlightPolicy()
+
+    XCTAssertEqual(policy.claim(turnID: UUID()), .start)
+    XCTAssertEqual(policy.claim(turnID: UUID()), .start)
+  }
+
+  func testAnAcceptedSpawnKeepsTheTurnClaimedEvenAfterTheAttemptFinishes() {
+    var policy = RealtimeSpawnSingleFlightPolicy()
+    let turn = UUID()
+
+    XCTAssertEqual(policy.claim(turnID: turn), .start)
+    XCTAssertTrue(policy.hasClaim(turnID: turn))
+    XCTAssertEqual(policy.claim(turnID: turn), .duplicate)
+  }
+
+  func testAFailedAttemptReleasesTheTurnForTheBoundedRetry() {
+    var policy = RealtimeSpawnSingleFlightPolicy()
+    let turn = UUID()
+
+    XCTAssertEqual(policy.claim(turnID: turn), .start)
+    policy.release(turnID: turn)
+
+    XCTAssertFalse(policy.hasClaim(turnID: turn))
+    XCTAssertEqual(
+      policy.claim(turnID: turn), .start,
+      "the one allowed retry with another agent must be able to spawn")
+  }
+
+  func testClaimBookkeepingDoesNotGrowUnbounded() {
+    var policy = RealtimeSpawnSingleFlightPolicy()
+    let first = UUID()
+    XCTAssertEqual(policy.claim(turnID: first), .start)
+
+    for _ in 0..<128 {
+      _ = policy.claim(turnID: UUID())
+    }
+
+    XCTAssertFalse(
+      policy.hasClaim(turnID: first),
+      "a full reset may only forget turns that can no longer be active")
+  }
 }

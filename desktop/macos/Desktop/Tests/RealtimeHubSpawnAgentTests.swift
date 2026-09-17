@@ -186,6 +186,31 @@ import XCTest
         .setupNeeded(.openclaw))
     }
 
+    func testUnreadableSpawnOverASucceededEnvelopeIsIndeterminateAndNeverRetryable() {
+      let continuityKey = "voice:00000000-0000-0000-0000-000000009520"
+      // The kernel's compaction can fail after the child run was created; the
+      // failure then still carries the succeeded source envelope. Treating it
+      // as an ordinary rejection invited a retry that spawned a second agent.
+      let oversized =
+        #"{"schemaVersion":1,"ok":false,"error":{"code":"realtime_spawn_result_oversized","message":"The background agent could not be started. Please try again.","retryable":true},"toolResultEnvelope":{"version":1,"status":"succeeded","truncated":false,"originalBytes":9000,"projectedBytes":9000,"fullOutputRef":null,"provenance":{"invocationId":"realtime:spawn","runId":"run-1","attemptId":"attempt-1","toolName":"spawn_agent"}}}"#
+
+      XCTAssertEqual(
+        RealtimeSpawnAgentToolOutcome.classify(
+          output: oversized,
+          expectedContinuityKey: continuityKey),
+        .indeterminate,
+        "a possibly-created child must never invite a second spawn")
+
+      let plainFailure =
+        #"{"schemaVersion":1,"ok":false,"error":{"code":"spawn_failed","message":"Could not start"},"toolResultEnvelope":{"version":1,"status":"failed","truncated":false,"originalBytes":10,"projectedBytes":10,"fullOutputRef":null,"provenance":{"invocationId":"realtime:spawn","runId":"unknown","attemptId":"unknown","toolName":"spawn_agent"}}}"#
+      XCTAssertEqual(
+        RealtimeSpawnAgentToolOutcome.classify(
+          output: plainFailure,
+          expectedContinuityKey: continuityKey),
+        .rejected,
+        "a definitively failed invocation keeps the bounded retry")
+    }
+
     func testSharedSpawnReceiptFixturesAcceptValidAndRejectMalformed() throws {
       let fixtureDir = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()

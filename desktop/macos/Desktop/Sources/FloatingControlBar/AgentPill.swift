@@ -184,6 +184,16 @@ struct AgentPillLifecycleConvergencePolicy {
     }
     return !pillStatus.isFinished
   }
+
+  /// Consecutive canonical reads that may fail before the pill stops claiming
+  /// the run is alive. A kernel/runtime outage used to leave the poll loop
+  /// catching errors forever, which kept the pill in its yellow "working"
+  /// glow with no way out; an unreadable run is reported as failed instead.
+  static let maximumConsecutiveInspectionFailures = 5
+
+  static func shouldAbandonPoll(consecutiveFailures: Int) -> Bool {
+    consecutiveFailures >= maximumConsecutiveInspectionFailures
+  }
 }
 
 enum AgentPillTerminalJournalMaterializationDecision: Equatable {
@@ -1778,6 +1788,7 @@ final class AgentPillsManager: ObservableObject {
         runTasksByPill[pill.id] = nil
       }
     }
+    var consecutiveInspectionFailures = 0
     while !Task.isCancelled {
       guard RuntimeOwnerIdentity.currentOwnerId() == pill.ownerID else { return }
       guard isCurrentRunAttempt(pillID: pill.id, generation: generation) else { return }
@@ -1788,6 +1799,7 @@ final class AgentPillsManager: ObservableObject {
         let inspection = try await DesktopCoordinatorService.shared.inspectAgentRun(
           runId: runId
         )
+        consecutiveInspectionFailures = 0
         guard RuntimeOwnerIdentity.currentOwnerId() == pill.ownerID else { return }
         guard isCurrentRunAttempt(pillID: pill.id, generation: generation) else { return }
         guard pill.canonicalRunId == runId else {
@@ -1821,7 +1833,17 @@ final class AgentPillsManager: ObservableObject {
         apply(inspection: inspection, to: pill, expectedRunId: runId, expectedAttemptId: attemptId)
         if pill.status.isFinished { return }
       } catch {
+        consecutiveInspectionFailures += 1
         logError("AgentPills: failed to inspect canonical run \(runId)", error: error)
+        if AgentPillLifecycleConvergencePolicy.shouldAbandonPoll(
+          consecutiveFailures: consecutiveInspectionFailures)
+        {
+          logError(
+            "AgentPills: giving up on unreadable run \(runId) after "
+              + "\(consecutiveInspectionFailures) consecutive inspection failures")
+          fail(pill: pill, errorText: "Couldn't read this agent's status")
+          return
+        }
       }
       try? await Task.sleep(nanoseconds: 2_000_000_000)
     }
