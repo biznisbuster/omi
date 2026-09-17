@@ -105,13 +105,16 @@ final class PTTTranscriptionPreferenceTests: XCTestCase {
       PTTDictationTranscriptionPreference(rawValue: "transcriptEngine"), .transcriptEngine)
     XCTAssertEqual(
       PTTDictationTranscriptionPreference.allCases.map(\.displayName),
-      ["Automatic", "On-device (Parakeet v3)", "Cloud (Omi batch)", "Transcript Engine (local)"],
-      "dictation offers the same recognizers as the transcript lane")
+      [
+        "Same as transcription", "Automatic", "On-device (Parakeet v3)", "Cloud (Omi batch)",
+        "Transcript Engine (local)",
+      ],
+      "dictation offers the transcript-lane recognizers plus an inherit default")
     XCTAssertEqual(
       PTTDictationTranscriptionPreference.defaultsKey, "pttDictationTranscriptionPreference")
   }
 
-  func testDictationPreferenceReadsItsOwnKeyNotTheTranscriptPin() {
+  func testUnsetDictationPreferenceInheritsTheTranscriptPinInsteadOfChangingBehavior() {
     let defaults = UserDefaults.standard
     let transcriptKey = PTTTranscriptionPreference.defaultsKey
     let dictationKey = PTTDictationTranscriptionPreference.defaultsKey
@@ -132,9 +135,34 @@ final class PTTTranscriptionPreferenceTests: XCTestCase {
     defaults.set(PTTTranscriptionPreference.transcriptEngine.rawValue, forKey: transcriptKey)
     defaults.removeObject(forKey: dictationKey)
 
+    XCTAssertEqual(PTTDictationTranscriptionPreference.current, .sameAsTranscription)
     XCTAssertEqual(
-      PTTDictationTranscriptionPreference.current, .automatic,
-      "a transcript-lane engine pin must not silently become the dictation recognizer")
+      PTTDictationTranscriptionPreference.current.resolved, .transcriptEngine,
+      "an existing setup that pinned the transcript lane must keep dictating with the same engine")
+  }
+
+  func testAnExplicitDictationChoiceOverridesTheInheritedPin() {
+    let defaults = UserDefaults.standard
+    let transcriptKey = PTTTranscriptionPreference.defaultsKey
+    let dictationKey = PTTDictationTranscriptionPreference.defaultsKey
+    let previousTranscript = defaults.string(forKey: transcriptKey)
+    let previousDictation = defaults.string(forKey: dictationKey)
+    defer {
+      for (key, value) in [
+        (transcriptKey, previousTranscript), (dictationKey, previousDictation),
+      ] {
+        if let value {
+          defaults.set(value, forKey: key)
+        } else {
+          defaults.removeObject(forKey: key)
+        }
+      }
+    }
+
+    defaults.set(PTTTranscriptionPreference.transcriptEngine.rawValue, forKey: transcriptKey)
+    defaults.set(PTTDictationTranscriptionPreference.onDevice.rawValue, forKey: dictationKey)
+
+    XCTAssertEqual(PTTDictationTranscriptionPreference.current.resolved, .onDevice)
   }
 
   // MARK: - Auto frozen out of the voice picker

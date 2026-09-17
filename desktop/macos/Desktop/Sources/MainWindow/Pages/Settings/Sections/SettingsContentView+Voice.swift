@@ -540,7 +540,7 @@ extension SettingsContentView {
   }
 
   private var dictationChainDescription: String {
-    switch PTTDictationTranscriptionPreference.current {
+    switch PTTDictationTranscriptionPreference.current.resolved {
     case .automatic:
       return "Omi cloud batch → Parakeet v3 (on-device)"
     case .onDevice:

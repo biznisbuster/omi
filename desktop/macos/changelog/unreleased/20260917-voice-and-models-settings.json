@@ -1,3 +1,3 @@
 {
-  "change": "Added a Voice & Models settings section: Voice Live shows the one model that hears, thinks and speaks, while Voice Transcript lets you pick the transcription, dictation, chat, and speaking-voice models independently"
+  "change": "Added a Voice & Models settings section: Voice Live shows the one model that hears, thinks and speaks, while Voice Transcript lets you pick the transcription, dictation, chat, and speaking-voice models independently — dictation follows the transcription model unless you choose its own"
 }

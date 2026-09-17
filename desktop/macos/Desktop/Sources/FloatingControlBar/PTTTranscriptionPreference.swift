@@ -118,17 +118,17 @@ enum PTTTranscriptionRoutePolicy {
   }
 }
 
-/// Which recognizer serves dictation (Omi Type voice typing), chosen separately
-/// from the transcript lane.
+/// Which recognizer serves dictation (Omi Type voice typing).
 ///
 /// The two lanes are different jobs: a transcript turn is a question for the
-/// chat model, while a dictation is text for the focused app. Keeping one pin
-/// for both meant a user's own local engine — picked for Serbian transcript
-/// turns — silently became the dictating recognizer too, and picking a dictation
-/// engine for the caret could redirect the chat lane. The order inside a
-/// dictation stays "backend recognizer, then the bundled on-device model"; this
-/// choice decides which backend recognizer a dictation may use.
+/// chat model, while a dictation is text for the focused app. The default stays
+/// **Same as transcription** — the single pin the two lanes shared before this
+/// choice existed — so an existing setup (for example a personal Transcript
+/// Engine) keeps dictating exactly as it did. An explicit choice overrides it
+/// per lane, and an On-device pin keeps a dictation off the network entirely.
 enum PTTDictationTranscriptionPreference: String, CaseIterable, Sendable {
+  /// Follow the transcript lane's recognizer pin.
+  case sameAsTranscription
   /// Omi's cloud batch recognizer, with the on-device model as fallback.
   case automatic
   /// On-device Parakeet only. A dictation never leaves this Mac.
@@ -145,12 +145,24 @@ enum PTTDictationTranscriptionPreference: String, CaseIterable, Sendable {
     guard
       let raw = UserDefaults.standard.string(forKey: defaultsKey),
       let value = PTTDictationTranscriptionPreference(rawValue: raw)
-    else { return .automatic }
+    else { return .sameAsTranscription }
     return value
+  }
+
+  /// The recognizer pin a dictation actually follows.
+  var resolved: PTTTranscriptionPreference {
+    switch self {
+    case .sameAsTranscription: return PTTTranscriptionPreference.current
+    case .automatic: return .automatic
+    case .onDevice: return .onDevice
+    case .cloud: return .cloud
+    case .transcriptEngine: return .transcriptEngine
+    }
   }
 
   var displayName: String {
     switch self {
+    case .sameAsTranscription: return "Same as transcription"
     case .automatic: return "Automatic"
     case .onDevice: return "On-device (Parakeet v3)"
     case .cloud: return "Cloud (Omi batch)"
@@ -160,6 +172,8 @@ enum PTTDictationTranscriptionPreference: String, CaseIterable, Sendable {
 
   var subtitle: String {
     switch self {
+    case .sameAsTranscription:
+      return "Follows the Transcription Model (\(PTTTranscriptionPreference.current.displayName))"
     case .automatic: return "Omi cloud batch first, then the on-device model"
     case .onDevice: return "Private and offline: a dictation never leaves this Mac"
     case .cloud: return "Omi's batch speech endpoint only"

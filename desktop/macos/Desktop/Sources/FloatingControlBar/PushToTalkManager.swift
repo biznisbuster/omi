@@ -3599,10 +3599,10 @@ class PushToTalkManager: ObservableObject {
     keywords: [String], language: String, allowNetwork: Bool,
     label: DictationRecognizerLabel = DictationRecognizerLabel()
   ) -> DictationTranscriber {
-    // Dictation has its own recognizer pin: a transcript-lane engine choice
-    // (often picked for a specific language) must not silently take over the
-    // caret, and an On-device dictation must never touch the network.
-    let preference = PTTDictationTranscriptionPreference.current
+    // Dictation follows its own pin; the default inherits the transcript lane,
+    // so an existing single-pin setup keeps dictating with the recognizer it
+    // always used. An explicit On-device pin never touches the network.
+    let preference = PTTDictationTranscriptionPreference.current.resolved
     return DictationTranscriber(
       isOnline: allowNetwork && preference != .onDevice
         && NetworkReachability.shared.isOnline,
