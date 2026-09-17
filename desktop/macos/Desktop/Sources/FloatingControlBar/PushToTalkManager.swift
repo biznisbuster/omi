@@ -3514,6 +3514,43 @@ class PushToTalkManager: ObservableObject {
     audioData: Data, language: String, contextKeywords: [String]
   ) async throws -> TranscriptionService.BatchTranscriptionResult {
     let preference = PTTTranscriptionPreference.current
+    // The user's own local engine first when they pinned it. A dead or
+    // unsupported engine must not strand the turn: it falls through to the
+    // built-in chain with the failure recorded.
+    if preference == .transcriptEngine {
+      do {
+        let started = Date()
+        let result = try await TranscriptEngineClient.configured.transcribe(
+          pcm16k: audioData, language: language)
+        log(
+          "PushToTalkManager: transcript engine served the turn ("
+            + "\(result.provider)/\(result.model ?? "-"), "
+            + "\(String(format: "%.1f", Date().timeIntervalSince(started)))s, "
+            + "\(result.transcript.count) chars)")
+        DesktopDiagnosticsManager.shared.recordFallback(
+          area: "ptt_cascade",
+          from: "builtin_stt",
+          to: "transcript_engine",
+          reason: "user_preference",
+          outcome: .recovered,
+          extra: [
+            "stt_provider": result.provider,
+            "stt_model": result.model ?? "unknown",
+            "user_visible": false,
+          ])
+        return TranscriptionService.BatchTranscriptionResult(
+          transcript: result.transcript, provider: result.provider, model: result.model)
+      } catch {
+        log("PushToTalkManager: transcript engine unavailable (\(error)) — using the built-in chain")
+        DesktopDiagnosticsManager.shared.recordFallback(
+          area: "ptt_cascade",
+          from: "transcript_engine",
+          to: "builtin_stt",
+          reason: "other",
+          outcome: .exhausted,
+          extra: ["stt_provider": "transcript-engine", "stt_model": "unknown", "user_visible": false])
+      }
+    }
     let localTranscript: String? =
       preference == .cloud
       ? nil
@@ -3543,7 +3580,16 @@ class PushToTalkManager: ObservableObject {
     DictationTranscriber(
       isOnline: allowNetwork && NetworkReachability.shared.isOnline,
       backend: { audio in
-        try await TranscriptionService.batchTranscribe(
+        // The user's pinned recognizer decodes dictation too; the built-in
+        // cloud batch recognizer is the fallback when it cannot.
+        if PTTTranscriptionPreference.current == .transcriptEngine,
+          let result = try? await TranscriptEngineClient.configured.transcribe(
+            pcm16k: audio, language: language),
+          !result.transcript.isEmpty
+        {
+          return result.transcript
+        }
+        return try await TranscriptionService.batchTranscribe(
           audioData: audio, language: language, contextKeywords: keywords
         ).transcript
       },

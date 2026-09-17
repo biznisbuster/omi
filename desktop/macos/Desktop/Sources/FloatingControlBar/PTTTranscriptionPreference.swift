@@ -49,6 +49,8 @@ enum PTTTranscriptionPreference: String, CaseIterable, Sendable {
   case onDevice
   /// Cloud batch recognizer only (Omi's batch speech endpoint).
   case cloud
+  /// The user's own local Transcript Engine server (its versioned local API).
+  case transcriptEngine
 
   static let defaultsKey = "pttTranscriptionPreference"
 
@@ -65,6 +67,7 @@ enum PTTTranscriptionPreference: String, CaseIterable, Sendable {
     case .automatic: return "Automatic"
     case .onDevice: return "On-device (Parakeet v3)"
     case .cloud: return "Cloud (Omi batch)"
+    case .transcriptEngine: return "Transcript Engine (local)"
     }
   }
 
@@ -73,6 +76,8 @@ enum PTTTranscriptionPreference: String, CaseIterable, Sendable {
     case .automatic: return "Decodes on this Mac, then falls back to the cloud batch recognizer"
     case .onDevice: return "Private and offline; a failed decode fails the turn instead of going to the cloud"
     case .cloud: return "Omi's batch speech endpoint; usually more accurate for some languages"
+    case .transcriptEngine:
+      return "Your own engine at 127.0.0.1:8765 (Serbian); falls back to the built-in chain when it is down"
     }
   }
 }
@@ -101,6 +106,10 @@ enum PTTTranscriptionRoutePolicy {
     switch preference {
     case .cloud:
       return .cloud
+    case .transcriptEngine:
+      // The engine is a network hop to a local server; the caller attempts it
+      // before this policy and falls back here when it cannot serve the turn.
+      return hasLocal ? .local : .localThenCloud
     case .onDevice:
       return hasLocal ? .local : .localFailed
     case .automatic:

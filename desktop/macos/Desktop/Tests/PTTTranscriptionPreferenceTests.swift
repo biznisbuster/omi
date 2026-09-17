@@ -75,6 +75,24 @@ final class PTTTranscriptionPreferenceTests: XCTestCase {
       "no network path means a dictation, whatever the answer mode says")
   }
 
+  func testTranscriptEngineIsASelectableEngineThatFallsBackToTheBuiltInChain() {
+    XCTAssertEqual(PTTTranscriptionPreference(rawValue: "transcriptEngine"), .transcriptEngine)
+    XCTAssertEqual(
+      PTTTranscriptionPreference.transcriptEngine.displayName, "Transcript Engine (local)")
+
+    // The engine is attempted before this policy; what it decides is the
+    // fallback when the engine cannot serve the turn.
+    XCTAssertEqual(
+      PTTTranscriptionRoutePolicy.decide(
+        preference: .transcriptEngine, isAppleSilicon: true, localTranscript: "zdravo"),
+      .local)
+    XCTAssertEqual(
+      PTTTranscriptionRoutePolicy.decide(
+        preference: .transcriptEngine, isAppleSilicon: true, localTranscript: ""),
+      .localThenCloud,
+      "a dead local engine must fall back to the built-in chain, not fail the turn")
+  }
+
   func testVoiceModeDefaultsToLiveAndRoundTrips() {
     XCTAssertEqual(PTTVoiceMode(rawValue: "transcript"), .transcript)
     XCTAssertEqual(PTTVoiceMode.allCases.map(\.displayName), ["Voice Live", "Voice Transcript"])

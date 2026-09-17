@@ -5,6 +5,22 @@ import UniformTypeIdentifiers
 import WebKit
 
 extension SettingsContentView {
+  /// The recognizers the voice lanes actually try, in order, for the pinned
+  /// Speech-to-Text Engine. Live answers transcribe inside the voice model;
+  /// this is the transcript lane and dictation.
+  private var transcriptionChainDescription: String {
+    switch PTTTranscriptionPreference.current {
+    case .automatic:
+      return "Parakeet v3 (on-device) → Omi cloud batch"
+    case .onDevice:
+      return "Parakeet v3 (on-device) only"
+    case .cloud:
+      return "Omi cloud batch only"
+    case .transcriptEngine:
+      return "Transcript Engine (\(TranscriptEngineClient.configured.baseURL.absoluteString)) → built-in fallback"
+    }
+  }
+
   /// One read-only role line: what runs, and where the control for it lives.
   private func modelRoleRow(_ title: String, value: String, hint: String) -> some View {
     VStack(alignment: .leading, spacing: OmiSpacing.hairline) {
@@ -345,11 +361,15 @@ extension SettingsContentView {
           modelRoleRow(
             "Voice transcription",
             value: voiceMode == .transcript
-              ? PTTTranscriptionPreference.current.displayName
+              ? transcriptionChainDescription
               : "inside the Live voice model",
             hint: voiceMode == .transcript
               ? "Settings → Transcription"
               : "Settings → Voice Answer Mode (switch to Transcript for a separate engine)")
+          modelRoleRow(
+            "Dictation (voice typing)",
+            value: transcriptionChainDescription,
+            hint: "Settings → Transcription")
           modelRoleRow(
             "Voice answer in Transcript mode",
             value: chatValue,
