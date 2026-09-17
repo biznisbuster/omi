@@ -1187,7 +1187,13 @@ struct VoiceTurnReducer {
     /// one tool call — observed live: the model's first `bash` call arrived at
     /// 24.8s — and a voice turn killed at the hub-scale cap returns no answer
     /// at all, so the user sees the turn do nothing.
-    var chatLaneAnswer: TimeInterval = 60
+    ///
+    /// 180 s rather than 60: an answer that takes a screenshot or a web lookup
+    /// spends two tool round-trips before it can write a word (observed live:
+    /// a voice turn cut at exactly 60 s while its second tool was still
+    /// running). This now matches the tool transport ceiling, so the answer
+    /// budget can never be the shortest bound in a tool-using turn.
+    var chatLaneAnswer: TimeInterval = 180
     var pendingTools: TimeInterval = 30
     var chatLaneTool: TimeInterval = 180
     var deferredCommit: TimeInterval = 8

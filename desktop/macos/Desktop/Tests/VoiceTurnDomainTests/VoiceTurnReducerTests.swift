@@ -2255,6 +2255,13 @@ final class VoiceTurnReducerTests: XCTestCase {
     XCTAssertGreaterThan(
       deadlines.chatLaneAnswer, deadlines.providerResponse,
       "the chat/agent answer budget must exceed the realtime hub's cap")
+    // Observed live: a voice turn was cut at exactly 60 s while its second tool
+    // round-trip was still running, so the answer never arrived and nothing was
+    // spoken. The answer budget may never be the shortest bound in a
+    // tool-using turn.
+    XCTAssertGreaterThanOrEqual(
+      deadlines.chatLaneAnswer, deadlines.chatLaneTool,
+      "a tool-using answer must not be cut off by its own answer budget")
 
     let turnID = VoiceTurnID()
     var model = reduce(.idle, .start(turnID: turnID, ownerID: nil, intent: .hold)).model

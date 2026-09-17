@@ -4,17 +4,28 @@ import Foundation
 enum AuthorizedRealtimeToolExecutionResult: Equatable, Sendable {
   case succeeded(String)
   case failed(String)
+  /// The hub is not this invocation's executor: no realtime turn registered it.
+  /// A desktop-chat turn (typed chat, Voice Transcript) that calls a tool the
+  /// manifest maps to the hub — `web_search` is the live example — must not be
+  /// told "unknown_realtime_invocation", which reads as a bug, loops the model
+  /// on retries, and (with the answer budget) kills the turn. The runtime
+  /// falls back to the chat executor instead.
+  case notExecutor
 
   var wireOutcome: String {
     switch self {
     case .succeeded: return "succeeded"
-    case .failed: return "failed"
+    case .failed, .notExecutor: return "failed"
     }
   }
 
   var wireResult: String {
     switch self {
     case .succeeded(let result), .failed(let result): return result
+    // Never the outcome of a completed command: the runtime falls back to the
+    // chat executor instead of completing `.notExecutor`. Keep a bounded,
+    // honest string for any future path that completes one anyway.
+    case .notExecutor: return "This tool is not available in this mode."
     }
   }
 }

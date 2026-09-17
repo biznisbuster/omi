@@ -553,7 +553,7 @@ extension RealtimeHubController {
     _ command: AuthorizedToolExecution
   ) async -> AuthorizedRealtimeToolExecutionResult {
     guard let invocation = authorizedRealtimeInvocations[command.invocationID] else {
-      return .failed(Self.authorizedRealtimeToolError(code: "unknown_realtime_invocation"))
+      return .notExecutor
     }
     let activeSourceObjectID = session.map(ObjectIdentifier.init)
     let activeToolIdentity = VoiceTurnCoordinator.shared.activeTurn?

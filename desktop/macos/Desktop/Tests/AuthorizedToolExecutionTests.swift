@@ -174,6 +174,18 @@ final class AuthorizedToolExecutionTests: XCTestCase {
     XCTAssertEqual(failed["result"] as? String, rejection)
   }
 
+  func testHubExecutorWithoutAnInvocationReportsANonExecutableOutcome() {
+    // The hub answers `.notExecutor` for an invocation it never registered —
+    // the case a desktop-chat turn hits when it calls a hub-mapped tool such as
+    // web_search. The runtime falls back to the chat executor, so this must
+    // never be completed as `unknown_realtime_invocation`: that read as a bug,
+    // looped the model on retries, and the answer budget then killed the turn.
+    XCTAssertEqual(AuthorizedRealtimeToolExecutionResult.notExecutor.wireOutcome, "failed")
+    XCTAssertEqual(
+      AuthorizedRealtimeToolExecutionResult.notExecutor.wireResult,
+      "This tool is not available in this mode.")
+  }
+
   func testRealtimeHandlerSuccessUsesSucceededLedgerOutcome() throws {
     let command = try AuthorizedToolExecution.parse(
       payload(

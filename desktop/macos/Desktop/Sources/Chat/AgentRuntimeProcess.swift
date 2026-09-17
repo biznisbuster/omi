@@ -3436,38 +3436,11 @@ actor AgentRuntimeProcess {
       let executionResult: AuthorizedRealtimeToolExecutionResult
       switch command.executor {
       case .chatToolExecutor:
-        let surface = AgentSurfaceReference(
-          surfaceKind: command.surfaceKind,
-          externalRefKind: command.externalRefKind ?? "session",
-          externalRefId: command.externalRefID ?? command.sessionID)
-        let toolCall = ToolCall(
-          name: command.canonicalToolName,
-          arguments: command.input,
-          thoughtSignature: nil)
-        let result = await ChatToolExecutor.execute(
-          toolCall,
-          originatingChatMode: ChatMode(rawValue: command.runMode),
-          originatingClientScope: command.surfaceKind == "floating_bar"
-            && command.externalRefKind == "pill"
-            ? AgentClientScope.floatingPill
-            : nil,
-          originatingSurfaceRef: surface,
-          originatingSessionID: command.sessionID,
-          originatingRunId: command.runID,
-          originatingAttemptId: command.attemptID,
-          toolCapabilityRef: command.capabilityRef,
-          chatFirstControlGeneration: command.chatFirstControlGeneration,
-          originatingUserText: command.originatingUserText,
-          isOnboardingSurface: command.surfaceKind == "onboarding",
-          expectedOwnerID: command.ownerID,
-          authorizationSnapshot: authorizationSnapshot)
-        if !Task.isCancelled,
-          RuntimeOwnerIdentity.isAuthorizationCurrent(authorizationSnapshot)
-        {
-          executionResult = .succeeded(result)
-        } else {
-          return
-        }
+        guard
+          let result = await executeWithChatToolExecutor(
+            command, authorizationSnapshot: authorizationSnapshot)
+        else { return }
+        executionResult = result
       case .realtimeHub:
         guard let handler = authorizedRealtimeToolHandler else {
           completeAuthorizedToolExecution(
@@ -3476,7 +3449,33 @@ actor AgentRuntimeProcess {
               Self.authorizedToolExecutionError(.unsupportedExecutor)))
           return
         }
-        executionResult = await handler(command)
+        let hubResult = await handler(command)
+        if hubResult == .notExecutor {
+          // A desktop-chat turn (typed chat, Voice Transcript) advertised a
+          // tool the manifest maps to the hub — `web_search` is the live case.
+          // The hub has no invocation for it outside a realtime session, and
+          // answering "unknown_realtime_invocation" read as a bug: the model
+          // retried, the turn ran past its answer budget, and the user got no
+          // answer and no speech. Run the tool on its chat implementation; a
+          // tool without one gets an honest "Unknown tool" result instead.
+          log(
+            "AgentRuntimeProcess: hub is not the executor for \(command.canonicalToolName); using the chat executor"
+          )
+          DesktopDiagnosticsManager.shared.recordFallback(
+            area: "agent_runtime",
+            from: "realtime_hub_executor",
+            to: "chat_tool_executor",
+            reason: "capability_mismatch",
+            outcome: .recovered,
+            extra: ["tool": command.canonicalToolName, "user_visible": false])
+          guard
+            let result = await executeWithChatToolExecutor(
+              command, authorizationSnapshot: authorizationSnapshot)
+          else { return }
+          executionResult = result
+        } else {
+          executionResult = hubResult
+        }
       }
       guard !Task.isCancelled,
         RuntimeOwnerIdentity.isAuthorizationCurrent(authorizationSnapshot)
@@ -3519,6 +3518,45 @@ actor AgentRuntimeProcess {
       task.cancel()
     }
     for task in tasks { await task.value }
+  }
+
+  /// One authorized tool command run through the chat executor. Shared by the
+  /// `chatToolExecutor` route and the hub-route fallback; nil means the owner
+  /// or task stopped being current while the tool ran and nothing may be
+  /// completed against the old authority.
+  private func executeWithChatToolExecutor(
+    _ command: AuthorizedToolExecution,
+    authorizationSnapshot: RuntimeOwnerAuthorizationSnapshot
+  ) async -> AuthorizedRealtimeToolExecutionResult? {
+    let surface = AgentSurfaceReference(
+      surfaceKind: command.surfaceKind,
+      externalRefKind: command.externalRefKind ?? "session",
+      externalRefId: command.externalRefID ?? command.sessionID)
+    let toolCall = ToolCall(
+      name: command.canonicalToolName,
+      arguments: command.input,
+      thoughtSignature: nil)
+    let result = await ChatToolExecutor.execute(
+      toolCall,
+      originatingChatMode: ChatMode(rawValue: command.runMode),
+      originatingClientScope: command.surfaceKind == "floating_bar"
+        && command.externalRefKind == "pill"
+        ? AgentClientScope.floatingPill
+        : nil,
+      originatingSurfaceRef: surface,
+      originatingSessionID: command.sessionID,
+      originatingRunId: command.runID,
+      originatingAttemptId: command.attemptID,
+      toolCapabilityRef: command.capabilityRef,
+      chatFirstControlGeneration: command.chatFirstControlGeneration,
+      originatingUserText: command.originatingUserText,
+      isOnboardingSurface: command.surfaceKind == "onboarding",
+      expectedOwnerID: command.ownerID,
+      authorizationSnapshot: authorizationSnapshot)
+    guard !Task.isCancelled,
+      RuntimeOwnerIdentity.isAuthorizationCurrent(authorizationSnapshot)
+    else { return nil }
+    return .succeeded(result)
   }
 
   private static func authorizedToolExecutionError(

@@ -411,6 +411,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
 
     let text = synthesisQueue.removeFirst()
     isSynthesizing = true
+    log(
+      "FloatingBarVoicePlaybackService: synthesizing \(text.count) chars mode=\(String(describing: mode))")
     let token = currentSynthesisToken()
     playbackTask?.cancel()
     playbackTask = Task { [weak self] in
@@ -949,6 +951,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       }
       audioPlayer = player
       activePlayerFallbackText = fallbackText
+      log(
+        "FloatingBarVoicePlaybackService: playback started bytes=\(data.count) rate=\(playbackRate)")
       if let lease = activePTTLease {
         _ = VoiceTurnCoordinator.shared.noteOutputProgress(lease)
       }

@@ -1,0 +1,3 @@
+{
+  "change": "Fixed voice answers that never arrived (and were never spoken): a tool the chat lane called outside Live mode failed with a phantom 'unknown realtime invocation' error, the model retried until the 60-second answer budget killed the turn, so the reply appeared late or not at all. Tools now run on the chat lane's own implementation, and the answer budget matches the tool ceiling"
+}

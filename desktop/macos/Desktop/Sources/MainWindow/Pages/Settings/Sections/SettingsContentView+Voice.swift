@@ -393,6 +393,11 @@ extension SettingsContentView {
           .foregroundColor(SettingsInk.notice)
           .fixedSize(horizontal: false, vertical: true)
         }
+
+        Text(speechModelLine)
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
   }
@@ -431,6 +436,24 @@ extension SettingsContentView {
       }
       Spacer()
     }
+  }
+
+  /// The exact speech model behind the selected voice, so "which model is
+  /// speaking?" has one answer in one place.
+  private var speechModelLine: String {
+    let voice = ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID)
+    if voice.isGeminiTTS, let geminiVoice = voice.geminiVoice {
+      let model =
+        FloatingBarVoicePlaybackService.geminiTTSModels.first ?? "gemini-tts"
+      return "Speaking model: \(model) · voice \(geminiVoice) (your Gemini key)"
+    }
+    if voice.isOpenAI, let openAIVoice = voice.openAIVoice {
+      return "Speaking model: OpenAI TTS · voice \(openAIVoice) (needs an OpenAI key)"
+    }
+    if voice.isLocalPiper {
+      return "Speaking model: Piper · \(LocalVoiceSynthesisService.modelID) (on-device)"
+    }
+    return "Speaking model: the macOS system voice"
   }
 
   private func startLocalVoiceInstall() {
