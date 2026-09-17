@@ -1,0 +1,3 @@
+{
+  "change": "Fixed the monthly-limit banner appearing above chat when your chat runs client-direct on your own key and never consumes the managed quota"
+}

@@ -28,12 +28,20 @@ struct ChatQuotaBanner: Equatable {
   /// The banner for the current usage, or nil when there is nothing to warn
   /// about (unlimited or BYOK quota, or the highest crossed threshold was
   /// already dismissed this cycle).
+  ///
+  /// `quotaApplies` is false when the next chat send would not be governed by
+  /// the managed quota at all — a client-direct BYOK lane (OpenCode Go) pays
+  /// its own provider and never reaches Omi's inference plane, so a "limit
+  /// reached" warning above the composer is a lie the user cannot act on while
+  /// their sends already work.
   static func current(
     quota: APIClient.ChatUsageQuota?,
     optimisticDelta: Int,
     dismissed: Set<String>,
+    quotaApplies: Bool = true,
     now: Date = Date()
   ) -> ChatQuotaBanner? {
+    guard quotaApplies else { return nil }
     guard let quota, let limit = quota.limit, limit > 0 else { return nil }
     // Only question quotas can be counted locally; a cost_usd plan has no
     // per-query estimate, so its usage moves on server syncs alone.

@@ -30,7 +30,8 @@ struct ChatQuotaBannerView: View {
       ChatQuotaBanner.current(
         quota: usageLimiter.serverQuota,
         optimisticDelta: usageLimiter.optimisticDelta,
-        dismissed: dismissals.dismissed)
+        dismissed: dismissals.dismissed,
+        quotaApplies: ChatQuotaAdmissionPolicy.managedQuotaGovernsThisLane)
     }
 
     var body: some View {

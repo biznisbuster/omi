@@ -51,6 +51,30 @@ final class ChatQuotaBannerTests: XCTestCase {
     XCTAssertNil(try banner(used: 449))
   }
 
+  func testAClientDirectLaneNeverShowsTheManagedQuotaWarning() throws {
+    // OpenCode Go chat never reaches Omi's inference plane, so the managed
+    // question quota does not govern the send and the banner must stay silent
+    // even at 100%+ of the managed allowance.
+    let banner = ChatQuotaBanner.current(
+      quota: try quota(used: 35, limit: 30),
+      optimisticDelta: 0,
+      dismissed: [],
+      quotaApplies: ChatQuotaAdmissionPolicy.quotaGovernsSend(
+        credentialScope: .managedCloud,
+        isByokActive: true,
+        selectedProvider: .opencodego),
+      now: Date(timeIntervalSince1970: 1_759_000_000))
+    XCTAssertNil(banner, "a managed-quota warning is meaningless on a client-direct lane")
+
+    XCTAssertFalse(
+      ChatQuotaAdmissionPolicy.quotaGovernsSend(
+        credentialScope: .managedCloud, isByokActive: true, selectedProvider: .opencodego))
+    XCTAssertTrue(
+      ChatQuotaAdmissionPolicy.quotaGovernsSend(
+        credentialScope: .managedCloud, isByokActive: true, selectedProvider: .openrouter),
+      "a server-routed key stays governed by the backend's exemption verdict")
+  }
+
   func testThresholdsAppearAsUsageClimbs() throws {
     XCTAssertEqual(try banner(used: 450)?.threshold, 90)
     XCTAssertEqual(try banner(used: 499)?.threshold, 90)

@@ -19,4 +19,14 @@ enum ChatQuotaAdmissionPolicy {
     if isByokActive, selectedProvider?.isClientDirect == true { return false }
     return true
   }
+
+  /// Presentation-side mirror of the same question for the app's managed shell.
+  /// The quota banner must not warn about a boundary a client-direct lane will
+  /// not cross: the user's sends already work, so "limit reached" is noise.
+  static var managedQuotaGovernsThisLane: Bool {
+    quotaGovernsSend(
+      credentialScope: .managedCloud,
+      isByokActive: APIKeyService.isByokActive,
+      selectedProvider: APIKeyService.selectedBYOKLLMProvider)
+  }
 }
