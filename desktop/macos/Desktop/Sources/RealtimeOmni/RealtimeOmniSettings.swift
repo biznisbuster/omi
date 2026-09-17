@@ -35,7 +35,7 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
     case .geminiFlashLive: return "Google · native audio + vision, lowest cost"
     case .gemini38Live: return "Google · low-latency dialogue, background async function calling"
     case .geminiNativeAudioDialog:
-      return "Google · native-audio dialogue; the automatic fallback when a newer Live model is unavailable"
+      return "Google · native-audio dialogue; also the automatic fallback for newer Live models"
     case .gptRealtime2: return "OpenAI · GA speech-to-speech"
     }
   }
