@@ -171,6 +171,8 @@ extension SettingsContentView {
         {
           GlassSeparator()
           transcriptEngineAddressRow
+          GlassSeparator()
+          TranscriptEngineModelChooser()
         }
       }
     }
@@ -221,7 +223,7 @@ extension SettingsContentView {
 
         Text(
           (PTTDictationTranscriptionPreference(
-            rawValue: pttDictationTranscriptionPreference) ?? .automatic).subtitle
+            rawValue: pttDictationTranscriptionPreference) ?? .sameAsTranscription).subtitle
         )
         .scaledFont(size: OmiType.caption)
         .foregroundColor(Ink.secondary)
@@ -231,6 +233,15 @@ extension SettingsContentView {
           .scaledFont(size: OmiType.caption)
           .foregroundColor(Ink.secondary)
           .fixedSize(horizontal: false, vertical: true)
+
+        if PTTDictationTranscriptionPreference.current.resolved == .transcriptEngine {
+          Text(
+            "The engine decodes dictation with its active model — the same one the Transcription Model card lists. Switch it there (the engine loads a new model on its next restart)."
+          )
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        }
       }
     }
   }
@@ -631,5 +642,85 @@ extension SettingsContentView {
           hint: "this pane")
       }
     }
+  }
+}
+
+/// The engine's registered ASR models, with the active one marked and an
+/// explicit "Use" action that records the selection on the engine itself.
+///
+/// The engine loads one model at a time and never restarts itself, so a
+/// selection that needs a restart says exactly that instead of pretending the
+/// switch already happened.
+private struct TranscriptEngineModelChooser: View {
+  @ObservedObject private var catalog = TranscriptEngineModelCatalog.shared
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: OmiSpacing.sm) {
+      HStack(spacing: OmiSpacing.sm) {
+        Image(systemName: "cpu")
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+        Text("Engine model")
+          .scaledFont(size: OmiType.caption, weight: .medium)
+          .foregroundColor(Ink.primary)
+        Spacer()
+        if case .loading = catalog.state {
+          ProgressView().controlSize(.mini)
+        } else {
+          Button("Refresh") {
+            Task { await catalog.refresh() }
+          }
+          .buttonStyle(.plain)
+          .scaledFont(size: OmiType.caption, weight: .medium)
+          .foregroundColor(Ink.secondary)
+        }
+      }
+
+      switch catalog.state {
+      case .idle, .loading:
+        Text("Asking the engine which models it has…")
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+      case .unavailable(let message):
+        Text(message)
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(SettingsInk.notice)
+          .fixedSize(horizontal: false, vertical: true)
+      case .loaded(let entries):
+        ForEach(entries) { entry in
+          HStack(spacing: OmiSpacing.sm) {
+            VStack(alignment: .leading, spacing: OmiSpacing.hairline) {
+              Text(entry.id)
+                .scaledFont(size: OmiType.body, weight: entry.active ? .semibold : .regular)
+                .foregroundColor(Ink.primary)
+              Text(entry.stateLabel)
+                .scaledFont(size: OmiType.caption)
+                .foregroundColor(Ink.secondary)
+            }
+            Spacer()
+            if entry.active {
+              Text("Active")
+                .scaledFont(size: OmiType.caption, weight: .medium)
+                .foregroundColor(Ink.listeningGreen)
+            } else {
+              Button("Use") {
+                Task { await catalog.activate(entry.id) }
+              }
+              .buttonStyle(OmiButtonStyle(.primary, size: .compact))
+              .disabled(catalog.isActivating)
+              .accessibilityIdentifier("voice.engine_model_use_\(entry.id)")
+            }
+          }
+        }
+      }
+
+      if let notice = catalog.activationNotice {
+        Text(notice)
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .task { await catalog.refresh() }
   }
 }

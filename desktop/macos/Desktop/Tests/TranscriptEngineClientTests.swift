@@ -280,6 +280,39 @@ final class TranscriptEngineClientTests: XCTestCase {
   }
 }
 
+/// The engine's model chooser reads the public registry shape and reports what
+/// an activation actually did (the engine loads a selected model only after a
+/// restart it owns).
+final class TranscriptEngineModelCatalogTests: XCTestCase {
+  func testParsesRegisteredModelsWithTheirStates() throws {
+    let json = """
+      {"active_model_id":"whisper-turbo","models":[
+        {"id":"whisper-tiny-sr","active":false,"available":false,"load_state":"unavailable","content_state":"installed"},
+        {"id":"whisper-turbo","active":true,"available":true,"load_state":"loaded","content_state":"installed"},
+        {"id":"","active":false,"available":true,"load_state":"loaded","content_state":"installed"}
+      ]}
+      """
+    let entries = TranscriptEngineModelCatalog.parseModels(Data(json.utf8))
+    XCTAssertEqual(entries.count, 2, "an empty id is not a model")
+    XCTAssertEqual(entries[0].id, "whisper-tiny-sr")
+    XCTAssertEqual(entries[0].stateLabel, "Installed, not loaded")
+    XCTAssertTrue(entries[1].active)
+    XCTAssertEqual(entries[1].stateLabel, "Active")
+  }
+
+  func testActivationReportsARestartRequirement() throws {
+    let needsRestart = TranscriptEngineModelCatalog.parseActivation(
+      Data(#"{"model_id":"whisper-large-v3","restart_required":true,"changed":true,"selection_generation":4}"#.utf8))
+    XCTAssertEqual(
+      needsRestart,
+      TranscriptEngineModelCatalog.ActivationResult(
+        modelID: "whisper-large-v3", restartRequired: true, changed: true))
+
+    XCTAssertNil(
+      TranscriptEngineModelCatalog.parseActivation(Data(#"{"changed":true}"#.utf8)),
+      "a reply without a model id must not read as a selection")
+  }
+}
 /// The streaming lane's byte policy: chunk 0 carries the header and a small
 /// first slice so the engine can start early; later chunks are one second each
 /// and never re-order or drop audio.
