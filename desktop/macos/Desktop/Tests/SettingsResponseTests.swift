@@ -14,7 +14,7 @@ final class SettingsResponseTests: XCTestCase {
       {"language": "sr"}
       """
     let resp = try JSONDecoder().decode(
-      UserLanguageResponse.self, from: json.data(using: .utf8)!)
+      UserLanguageResponse.self, from: try XCTUnwrap(json.data(using: .utf8)))
     XCTAssertEqual(resp.language, "sr")
   }
 
@@ -26,7 +26,7 @@ final class SettingsResponseTests: XCTestCase {
       {"language": null}
       """
     let resp = try JSONDecoder().decode(
-      UserLanguageResponse.self, from: json.data(using: .utf8)!)
+      UserLanguageResponse.self, from: try XCTUnwrap(json.data(using: .utf8)))
     XCTAssertEqual(resp.language, "")
   }
 

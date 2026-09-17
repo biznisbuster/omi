@@ -1392,14 +1392,17 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       code: 1,
       userInfo: [NSLocalizedDescriptionKey: "Gemini TTS produced no audio."])
     for model in geminiTTSModels {
-      var request = URLRequest(
-        url: URL(
-          string:
-            "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(key)"
-        )!)
+      // The key travels in the documented header, never in a URL that could be
+      // logged or cached.
+      guard
+        let url = URL(
+          string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")
+      else { continue }
+      var request = URLRequest(url: url)
       request.httpMethod = "POST"
       request.timeoutInterval = 30
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
       request.httpBody = bodyData
       do {
         let (data, response) = try await URLSession.shared.data(for: request)

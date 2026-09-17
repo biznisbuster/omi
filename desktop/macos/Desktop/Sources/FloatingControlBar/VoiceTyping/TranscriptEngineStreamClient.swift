@@ -176,12 +176,11 @@ actor TranscriptEngineStreamClient {
   /// Live display text while the take is open: the committed stitch plus the
   /// engine's display-only tail. Nil while nothing is decodable yet.
   func partialText() async -> String? {
-    guard let sessionID, !isStopped else { return nil }
-    var components = URLComponents(
-      url: baseURL.appendingPathComponent("v1/transcriptions/stream/\(sessionID)/partial"),
-      resolvingAgainstBaseURL: false)!
-    components.queryItems = [URLQueryItem(name: "wait_ms", value: "1500")]
-    var request = URLRequest(url: components.url!)
+    guard let sessionID, !isStopped,
+      let url = url(
+        path: "v1/transcriptions/stream/\(sessionID)/partial", query: ["wait_ms": "1500"])
+    else { return nil }
+    var request = URLRequest(url: url)
     request.timeoutInterval = 5
     guard let (data, _) = try? await session.data(for: request),
       let partial = try? JSONDecoder().decode(Partial.self, from: data)
@@ -242,6 +241,21 @@ actor TranscriptEngineStreamClient {
 
   // MARK: - Pump
 
+  /// A request URL built without force unwraps: a malformed base address is a
+  /// configuration mistake, not a crash.
+  private func url(path: String, query: [String: String] = [:]) -> URL? {
+    guard
+      var components = URLComponents(
+        url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+    else { return nil }
+    if !query.isEmpty {
+      components.queryItems = query.sorted { $0.key < $1.key }.map {
+        URLQueryItem(name: $0.key, value: $0.value)
+      }
+    }
+    return components.url
+  }
+
   private func startPumpIfNeeded() {
     // Audio may arrive before the session create completes; the buffer holds it
     // and the pump starts only once there is a session to upload to.
@@ -296,10 +310,10 @@ actor TranscriptEngineStreamClient {
 
   private func waitForJob(jobID: String, until deadline: Date) async throws -> String {
     while Date() < deadline {
-      var components = URLComponents(
-        url: baseURL.appendingPathComponent("v1/jobs/\(jobID)"), resolvingAgainstBaseURL: false)!
-      components.queryItems = [URLQueryItem(name: "wait_ms", value: "15000")]
-      var request = URLRequest(url: components.url!)
+      guard let url = url(path: "v1/jobs/\(jobID)", query: ["wait_ms": "15000"]) else {
+        throw TranscriptEngineClient.Failure.unavailable
+      }
+      var request = URLRequest(url: url)
       request.timeoutInterval = 20
       guard let (data, _) = try? await session.data(for: request),
         let job = try? JSONDecoder().decode(Job.self, from: data)
