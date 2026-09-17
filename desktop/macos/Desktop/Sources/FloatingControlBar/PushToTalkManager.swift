@@ -4039,7 +4039,8 @@ extension PushToTalkManager {
     let raw: String?
     switch provider {
     case .gptRealtime2: raw = env["OPENAI_API_KEY"]
-    case .geminiFlashLive, .gemini38Live, .auto: raw = env["GEMINI_API_KEY"] ?? env["GOOGLE_API_KEY"]
+    case .geminiFlashLive, .gemini38Live, .geminiNativeAudioDialog, .auto:
+      raw = env["GEMINI_API_KEY"] ?? env["GOOGLE_API_KEY"]
     }
     guard let raw, !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
     return raw

@@ -81,6 +81,12 @@ covers:
   - desktop/macos/Desktop/Sources/FloatingControlBar/FloatingControlBarManager+RealtimeStreamingJournal.swift
   - desktop/macos/Desktop/Sources/FloatingControlBar/ScreenCaptureManager.swift
   - desktop/macos/Desktop/Sources/FloatingControlBar/RealtimeHubSettings.swift
+  # The realtime credential-health policy: which BYOK failures pause a key
+  # (quota cooldown) versus ban it (auth), consulted by the hub's warm path.
+  - desktop/macos/Desktop/Sources/CredentialHealthManager.swift
+  # One Live start per rolling minute: every start re-sends the hub context and
+  # the provider meters Live usage in tokens per minute.
+  - desktop/macos/Desktop/Sources/FloatingControlBar/LiveSessionStartBudget.swift
   # The Voice Model picker's store: the hub provider and, for client-direct
   # sessions, the requested Live model both resolve from this selection.
   - desktop/macos/Desktop/Sources/RealtimeOmni/RealtimeOmniSettings.swift

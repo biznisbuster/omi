@@ -214,6 +214,12 @@ final class RealtimeHubSession: NSObject, @unchecked Sendable {
   /// sessions leave it nil and request exactly what the token was minted for.
   private let modelIDOverride: String?
   private var effectiveModelID: String { modelIDOverride ?? provider.modelID }
+  /// The model this session actually requests — the hub's same-provider model
+  /// fallback needs it to tell "the selected model failed" from "the fallback
+  /// already failed".
+  var requestedModelID: String { effectiveModelID }
+  /// Whether this session runs on the user's own key (no Omi minted credential).
+  var isClientDirectAuth: Bool { auth.isClientDirect }
 
   /// Log prefix that names the provider + model on every line, so it's always
   /// clear which model produced which event.

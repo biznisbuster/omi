@@ -135,7 +135,10 @@ final class CredentialHealthManager: ObservableObject {
   /// the provider's whole warm timeout before the cascade could run — the
   /// "sometimes the realtime voice works, sometimes it degrades to the local
   /// one" churn, paid turn by turn.
-  static let quotaCooldown: TimeInterval = 10 * 60
+  /// Live/provider rate windows reset per minute (Google meters Live usage in
+  /// tokens per minute), so a long ban would keep voice off after the window
+  /// passed. The goal is to stop per-turn retries, not to punish the key.
+  static let quotaCooldown: TimeInterval = 60
   private var quotaBlockedBYOKFingerprints: [BYOKProvider: (fingerprint: String, blockedUntil: Date)] = [:]
 
   /// Injectable so the cooldown is testable without wall-clock sleeps.

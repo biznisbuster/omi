@@ -1,0 +1,1 @@
+{"change": "Realtime voice now starts at most one Live session per minute (each start re-sends the whole context and the provider meters tokens per minute), and barge-in reuses the current session when a restart is not affordable — this stops the 'sometimes the voice works, sometimes it falls back' churn caused by hitting the provider's token-per-minute budget"}

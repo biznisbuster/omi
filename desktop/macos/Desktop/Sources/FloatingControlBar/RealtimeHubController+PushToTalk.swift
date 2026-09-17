@@ -265,11 +265,12 @@ extension RealtimeHubController {
         session?.cancelActiveResponse()
       }
     } else if requiresCompletedGeminiSessionBoundary {
-      if restartSessionForBargeIn(interruptedTurnTask: nil) {
+      if canRestartLiveSession(), restartSessionForBargeIn(interruptedTurnTask: nil) {
         deferredFreshSessionContextPrefetch = true
         geminiSessionNeedsTurnBoundary = false
         log("RealtimeHub[gemini]: replacing completed-turn session before next PTT")
       } else {
+        log("RealtimeHub[gemini]: session replacement deferred by the Live start budget")
         session?.cancelActiveResponse()
       }
     } else {
@@ -283,7 +284,9 @@ extension RealtimeHubController {
         // Gemini Live has no reliable in-session cancel for a streaming reply. Reusing
         // that socket can leave the next PTT turn queued behind the old generation, so
         // replace the connection and let the fresh session buffer this new turn while it opens.
-        if restartSessionForBargeIn(interruptedTurnTask: interruptedTurnTask) {
+        if canRestartLiveSession(),
+          restartSessionForBargeIn(interruptedTurnTask: interruptedTurnTask)
+        {
           deferredFreshSessionContextPrefetch = true
           log("RealtimeHub: barge-in — replacing session for clean next turn")
         } else {

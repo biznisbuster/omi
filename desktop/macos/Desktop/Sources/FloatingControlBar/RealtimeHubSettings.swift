@@ -79,8 +79,25 @@ final class RealtimeHubSettings {
     guard isClientDirectBYOK else { return provider.modelID }
     switch (provider, voiceModel) {
     case (.gemini, .gemini38Live): return RealtimeOmniProvider.gemini38Live.modelID
+    case (.gemini, .geminiNativeAudioDialog): return RealtimeOmniProvider.geminiNativeAudioDialog.modelID
     default: return provider.modelID
     }
+  }
+
+  /// Same-provider model fallback for client-direct sessions.
+  ///
+  /// Google's Live quotas are per model, so a quota-exhausted (or unavailable)
+  /// Live model can still be served by the provider's native-audio dialogue
+  /// model with the same key. The hub retries this model before switching to
+  /// the other provider — without it, one model's quota ends realtime voice for
+  /// the whole key.
+  nonisolated static func fallbackModelID(
+    provider: RealtimeHubProvider,
+    effectiveModelID: String
+  ) -> String? {
+    guard provider == .gemini else { return nil }
+    let fallback = RealtimeOmniProvider.geminiNativeAudioDialog.modelID
+    return effectiveModelID == fallback ? nil : fallback
   }
 
   /// The hub provider follows the user's "Voice Model" choice in Advanced settings —
@@ -89,7 +106,7 @@ final class RealtimeHubSettings {
   var provider: RealtimeHubProvider {
     switch RealtimeOmniSettings.shared.effectiveProvider {
     case .gptRealtime2: return .openai
-    case .geminiFlashLive, .gemini38Live, .auto: return .gemini
+    case .geminiFlashLive, .gemini38Live, .geminiNativeAudioDialog, .auto: return .gemini
     }
   }
 

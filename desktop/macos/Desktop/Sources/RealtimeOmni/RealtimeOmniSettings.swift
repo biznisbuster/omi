@@ -16,6 +16,7 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
   case auto
   case geminiFlashLive
   case gemini38Live
+  case geminiNativeAudioDialog
   case gptRealtime2
 
   var displayName: String {
@@ -23,6 +24,7 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
     case .auto: return "Auto"
     case .geminiFlashLive: return "Gemini 3.1 Flash Live"
     case .gemini38Live: return "Gemini 3.8 Live"
+    case .geminiNativeAudioDialog: return "Gemini 2.5 Flash Native Audio Dialog"
     case .gptRealtime2: return "GPT Realtime 2"
     }
   }
@@ -32,6 +34,8 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
     case .auto: return "Daily-picks the best model by quality & speed"
     case .geminiFlashLive: return "Google · native audio + vision, lowest cost"
     case .gemini38Live: return "Google · low-latency dialogue, background async function calling"
+    case .geminiNativeAudioDialog:
+      return "Google · native-audio dialogue; the automatic fallback when a newer Live model is unavailable"
     case .gptRealtime2: return "OpenAI · GA speech-to-speech"
     }
   }
@@ -42,6 +46,7 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
     case .auto: return RealtimeOmniProvider.geminiFlashLive.modelID
     case .geminiFlashLive: return "gemini-3.1-flash-live-preview"
     case .gemini38Live: return "gemini-3.8-live"
+    case .geminiNativeAudioDialog: return "gemini-2.5-flash-native-audio-latest"
     case .gptRealtime2: return "gpt-realtime-2"
     }
   }

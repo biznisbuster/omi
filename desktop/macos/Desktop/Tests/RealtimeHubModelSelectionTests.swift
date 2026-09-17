@@ -42,6 +42,32 @@ final class RealtimeHubModelSelectionTests: XCTestCase {
       RealtimeHubProvider.openai.modelID)
   }
 
+  func testSameProviderModelFallbackIsTheNativeAudioDialogueModel() {
+    XCTAssertEqual(
+      RealtimeHubSettings.fallbackModelID(
+        provider: .gemini, effectiveModelID: "gemini-3.8-live"),
+      "gemini-2.5-flash-native-audio-latest")
+    XCTAssertNil(
+      RealtimeHubSettings.fallbackModelID(
+        provider: .gemini, effectiveModelID: "gemini-2.5-flash-native-audio-latest"),
+      "already on the fallback model — no second swap")
+    XCTAssertNil(
+      RealtimeHubSettings.fallbackModelID(
+        provider: .openai, effectiveModelID: "gpt-realtime-2"),
+      "OpenAI has no designated model fallback")
+  }
+
+  func testNativeAudioFallbackIsSelectableAndUsesItsLiveModelID() {
+    XCTAssertTrue(RealtimeOmniProvider.allCases.contains(.geminiNativeAudioDialog))
+    XCTAssertEqual(
+      RealtimeOmniProvider.geminiNativeAudioDialog.modelID,
+      "gemini-2.5-flash-native-audio-latest")
+    XCTAssertEqual(
+      RealtimeHubSettings.sessionModelID(
+        provider: .gemini, isClientDirectBYOK: true, voiceModel: .geminiNativeAudioDialog),
+      "gemini-2.5-flash-native-audio-latest")
+  }
+
   func testNewerLiveModelIsSelectableWithoutJoiningAuto() {
     XCTAssertTrue(RealtimeOmniProvider.allCases.contains(.gemini38Live))
     XCTAssertEqual(RealtimeOmniProvider.gemini38Live.modelID, "gemini-3.8-live")

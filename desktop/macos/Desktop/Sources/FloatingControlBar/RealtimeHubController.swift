@@ -366,6 +366,51 @@ final class RealtimeHubController: NSObject, RealtimeHubSessionDelegate {
   var presenceIdleProvider: () -> TimeInterval? = { UserInputPresence.secondsSinceLastInput() }
 
   var fallbackProvider: RealtimeHubProvider?
+  /// Client-direct Live sessions re-send the whole hub context per start, and the
+  /// provider meters Live usage in tokens per minute; see `LiveSessionStartBudget`.
+  var liveSessionStartBudget = LiveSessionStartBudget()
+
+  /// Model override for the next client-direct session start: set when the
+  /// provider rejected the selected model (policy close) so the retry uses the
+  /// provider's native-audio dialogue model instead of the whole key dying.
+  var modelFallbackOverride: String?
+  /// One fallback-model attempt per successful connect / selection change.
+  var usedModelFallback = false
+
+  /// Whether a same-provider session restart is affordable right now. Barge-in
+  /// replacements re-send the whole context; when the start budget is spent the
+  /// imperfect in-session interrupt (already the OpenAI path) beats losing
+  /// realtime voice to a quota close on the next start.
+  func canRestartLiveSession(now: Date = Date()) -> Bool {
+    liveSessionStartBudget.canStart(now: now)
+  }
+
+  /// Retries the same provider with its designated fallback model, once per
+  /// selection, for failures that say "this model", not "this key".
+  func failoverToFallbackModel(reason: String) -> Bool {
+    guard !usedModelFallback,
+      let current = sessionProvider,
+      let session,
+      session.isClientDirectAuth,
+      let fallback = RealtimeHubSettings.fallbackModelID(
+        provider: current, effectiveModelID: session.requestedModelID)
+    else { return false }
+    usedModelFallback = true
+    modelFallbackOverride = fallback
+    log(
+      "RealtimeHub: \(current.displayName) \(session.requestedModelID) rejected — retrying with \(fallback) (reason=\(reason))"
+    )
+    DesktopDiagnosticsManager.shared.recordFallback(
+      area: "realtime_hub",
+      from: session.requestedModelID,
+      to: fallback,
+      reason: reason,
+      outcome: .degraded,
+      extra: ["user_visible": false])
+    replaceSessionAfterDrain()
+    return true
+  }
+
   /// Reason passed to ``failoverToAlternateProvider``; cleared after a successful connect on the alternate.
   var pendingFailoverReason: String?
 
@@ -1458,6 +1503,9 @@ final class RealtimeHubController: NSObject, RealtimeHubSessionDelegate {
 
   @objc private func settingsChanged() {
     resetFailoverForProviderSettingsChange()
+    // A new Voice Model pick clears a fallback model the provider forced on us.
+    modelFallbackOverride = nil
+    usedModelFallback = false
     // Only reconnect if the provider actually changed — avoids redundant
     // teardown/recreate races on unrelated notifications.
     if session != nil, sessionProvider == RealtimeHubSettings.shared.provider,

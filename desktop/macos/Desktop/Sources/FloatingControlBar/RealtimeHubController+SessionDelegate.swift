@@ -685,6 +685,10 @@ extension RealtimeHubController {
     guard isCurrentSession(source) else { return }
     lastWarmAt = Date()
     hubConnected = true  // authenticated + ready — PTT may now route turns to the hub
+    // The session that just connected is proof its model works: re-arm one
+    // fallback attempt for later, but keep a fallback model sticky so a start
+    // never bounces back to the model the provider just rejected.
+    usedModelFallback = false
     AgentCompletionVoiceDelivery.shared.voiceSessionDidConnect()
     NotchCardVoiceDelivery.shared.voiceSessionDidConnect()
     InterjectClassificationDelivery.shared.voiceSessionDidConnect()
@@ -1526,6 +1530,18 @@ extension RealtimeHubController {
         turnOutcome: turnOutcome,
         recoveryAction: .cascade,
         recoveryResult: .exhausted)
+      return
+    }
+    // A model the provider itself rejects (unsupported model id, policy close)
+    // is the one failure a same-provider model swap fixes; quota closes keep
+    // their cooldown instead.
+    if case .providerPolicyClose = credentialFailureClass,
+      failoverToFallbackModel(reason: "policy_close")
+    {
+      recordCloseResolution(
+        turnOutcome: turnOutcome,
+        recoveryAction: .providerFailover,
+        recoveryResult: .started)
       return
     }
     // Re-warm so the NEXT PTT uses the hub, not the STT cascade. Gemini idle-closes

@@ -236,7 +236,7 @@ final class RealtimeOmniService: NSObject, @unchecked Sendable {
     switch provider {
     case .gptRealtime2:
       send(json: ["type": "input_audio_buffer.append", "audio": b64])
-    case .geminiFlashLive, .gemini38Live, .auto:
+    case .geminiFlashLive, .gemini38Live, .geminiNativeAudioDialog, .auto:
       send(json: ["realtimeInput": ["audio": ["data": b64, "mimeType": "audio/pcm;rate=16000"]]])
     }
   }
@@ -253,7 +253,7 @@ final class RealtimeOmniService: NSObject, @unchecked Sendable {
     switch provider {
     case .gptRealtime2:
       send(json: ["type": "input_audio_buffer.commit"])
-    case .geminiFlashLive, .gemini38Live, .auto:
+    case .geminiFlashLive, .gemini38Live, .geminiNativeAudioDialog, .auto:
       send(json: ["realtimeInput": ["activityEnd": [:]]])
     }
   }
@@ -272,7 +272,7 @@ final class RealtimeOmniService: NSObject, @unchecked Sendable {
         ],
       ])
       send(json: ["type": "response.create"])
-    case .geminiFlashLive, .gemini38Live, .auto:
+    case .geminiFlashLive, .gemini38Live, .geminiNativeAudioDialog, .auto:
       send(json: [
         "clientContent": [
           "turns": [["role": "user", "parts": [["text": "Read this aloud verbatim: \(text)"]]]],
@@ -303,7 +303,7 @@ final class RealtimeOmniService: NSObject, @unchecked Sendable {
           ],
         ],
       ])
-    case .geminiFlashLive, .gemini38Live, .auto:
+    case .geminiFlashLive, .gemini38Live, .geminiNativeAudioDialog, .auto:
       // gemini-3.1-flash-live only supports AUDIO output (TEXT is rejected
       // with close 1007). For STT-only we ignore the audio and read
       // inputAudioTranscription. PTT controls turns manually, so disable
@@ -373,7 +373,7 @@ final class RealtimeOmniService: NSObject, @unchecked Sendable {
     guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
     switch provider {
     case .gptRealtime2: handleOpenAI(obj)
-    case .geminiFlashLive, .gemini38Live, .auto: handleGemini(obj)
+    case .geminiFlashLive, .gemini38Live, .geminiNativeAudioDialog, .auto: handleGemini(obj)
     }
   }
 
