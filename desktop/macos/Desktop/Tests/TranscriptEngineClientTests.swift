@@ -86,7 +86,11 @@ final class TranscriptEngineClientTests: XCTestCase {
       path: "/v1/transcriptions", json: #"{"job_id":"job-1","transcription_id":"tr-1"}"#)
     TranscriptEngineURLStub.respond(path: "/v1/jobs/job-1", json: #"{"state":"succeeded"}"#)
     TranscriptEngineURLStub.respond(path: "/v1/transcriptions/tr-1", json: #"{"text":"  Zdravo svete  "}"#)
-    TranscriptEngineURLStub.respond(path: "/v1/models", json: #"[{"id":"whisper-turbo","active":true}]"#)
+    TranscriptEngineURLStub.respond(
+      path: "/v1/models",
+      json:
+        #"{"active_model_id":"whisper-turbo","models":[{"id":"whisper-tiny-sr","active":false},{"id":"whisper-turbo","active":true}]}"#
+    )
 
     let result = try await client.transcribe(pcm16k: Data(repeating: 1, count: 3200), language: "sr")
 

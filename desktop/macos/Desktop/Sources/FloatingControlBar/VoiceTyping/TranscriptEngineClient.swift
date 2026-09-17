@@ -175,10 +175,27 @@ struct TranscriptEngineClient: Sendable {
     var request = URLRequest(url: baseURL.appendingPathComponent("v1/models"))
     request.timeoutInterval = 3
     guard let data = try? await session.data(for: request).0,
-      let models = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+      let object = try? JSONSerialization.jsonObject(with: data)
     else { return nil }
-    let active = models.first { ($0["active"] as? Bool) == true }
-    return active?["id"] as? String
+    // The API answers either a bare list or the `{active_model_id, models}`
+    // envelope; accept both so a version bump cannot silently drop the name.
+    if let envelope = object as? [String: Any] {
+      if let active = envelope["active_model_id"] as? String, !active.isEmpty {
+        return active
+      }
+      if let models = envelope["models"] as? [[String: Any]] {
+        return Self.activeModelID(in: models)
+      }
+      return nil
+    }
+    if let models = object as? [[String: Any]] {
+      return Self.activeModelID(in: models)
+    }
+    return nil
+  }
+
+  private static func activeModelID(in models: [[String: Any]]) -> String? {
+    models.first { ($0["active"] as? Bool) == true }?["id"] as? String
   }
 
   // MARK: - Pure helpers
