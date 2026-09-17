@@ -55,6 +55,11 @@ enum RealtimeOmniProvider: String, CaseIterable, Sendable {
   /// user-pinnable models stay out of the automatic pick until the daily
   /// quality/speed source scores them.
   static var selectable: [RealtimeOmniProvider] { [.geminiFlashLive, .gptRealtime2] }
+
+  /// What the Voice Model picker offers. Auto is not offered: pinning the model
+  /// is the point of the setting, and a resolved pick is what Auto did anyway.
+  /// `.auto` stays decodable for values persisted before the picker changed.
+  static var userSelectable: [RealtimeOmniProvider] { allCases.filter { $0 != .auto } }
 }
 
 // MARK: - Settings store (mirrors AssistantSettings persistence pattern)
@@ -104,6 +109,17 @@ final class RealtimeOmniSettings {
   var effectiveProvider: RealtimeOmniProvider {
     guard selectedProvider == .auto else { return selectedProvider }
     return AutoModelSelector.shared.currentPick ?? .geminiFlashLive
+  }
+
+  /// The Voice Model picker no longer offers Auto. Freeze a stored Auto
+  /// selection to the pick it would have resolved to, so behavior does not
+  /// silently change and the model in use becomes a visible, user-owned choice.
+  static func migrateStoredAutoSelection(defaults: UserDefaults = .standard) {
+    let key = "realtimeOmniProvider"
+    guard defaults.string(forKey: key) == RealtimeOmniProvider.auto.rawValue else { return }
+    let frozen = AutoModelSelector.shared.currentPick ?? .geminiFlashLive
+    defaults.set(frozen.rawValue, forKey: key)
+    log("RealtimeOmniSettings: froze stored Auto voice model to \(frozen.rawValue)")
   }
 }
 

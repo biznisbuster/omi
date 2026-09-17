@@ -169,7 +169,7 @@ extension SettingsContentView {
             Spacer()
 
             SettingsMenuPicker(selection: $realtimeOmniProvider) {
-              ForEach(RealtimeOmniProvider.allCases, id: \.rawValue) { p in
+              ForEach(RealtimeOmniProvider.userSelectable, id: \.rawValue) { p in
                 Text(p.displayName).tag(p.rawValue)
               }
             }
@@ -184,11 +184,7 @@ extension SettingsContentView {
             }
           }
 
-          if let p = RealtimeOmniProvider(rawValue: realtimeOmniProvider), p == .auto {
-            Text("\(p.subtitle) · currently \(RealtimeOmniSettings.shared.effectiveProvider.displayName)")
-              .scaledFont(size: OmiType.caption)
-              .foregroundColor(Ink.secondary)
-          } else if let p = RealtimeOmniProvider(rawValue: realtimeOmniProvider) {
+          if let p = RealtimeOmniProvider(rawValue: realtimeOmniProvider), p != .auto {
             Text(p.subtitle)
               .scaledFont(size: OmiType.caption)
               .foregroundColor(Ink.secondary)

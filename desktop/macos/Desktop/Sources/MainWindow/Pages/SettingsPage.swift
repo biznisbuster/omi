@@ -367,6 +367,8 @@ struct SettingsContentView: View {
   // AI Chat settings
   @AppStorage("chatBridgeMode") var chatBridgeMode: String = "piMono"
   @AppStorage("realtimeOmniProvider") var realtimeOmniProvider: String = RealtimeOmniProvider.auto.rawValue
+  @AppStorage(PTTTranscriptionPreference.defaultsKey) var pttTranscriptionPreference: String =
+    PTTTranscriptionPreference.automatic.rawValue
   @AppStorage("askModeEnabled") var askModeEnabled = false
   @AppStorage("aiChatWorkingDirectory") var aiChatWorkingDirectory: String = ""
   @State var aiChatClaudeMdContent: String?

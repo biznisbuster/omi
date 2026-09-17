@@ -1,0 +1,3 @@
+{
+  "change": "Added a Speech-to-Text Engine choice (Automatic / On-device Parakeet / Cloud) and removed Auto from the Voice Model picker so the model in use is explicit"
+}

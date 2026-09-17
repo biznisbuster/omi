@@ -3460,20 +3460,34 @@ class PushToTalkManager: ObservableObject {
   /// honours the user's language; the cloud batch pool does not (a Serbian turn
   /// came back in Cyrillic from Modulate). The cloud route stays the fallback
   /// when the local decode yields nothing or the model cannot load, so a bad
-  /// room or mic still gets a second chance.
+  /// room or mic still gets a second chance — unless the user pinned the engine
+  /// to On-device, where a failed decode is reported instead of sent to a
+  /// recognizer they did not choose.
   private func batchTranscribeLocalFirst(
     audioData: Data, language: String, contextKeywords: [String]
   ) async throws -> TranscriptionService.BatchTranscriptionResult {
-    if AppState.isAppleSilicon,
-      let local = await PTTLanguageIdentifier.shared.transcribe(pcm16k: audioData, language: language),
-      !local.isEmpty
+    let preference = PTTTranscriptionPreference.current
+    let localTranscript: String? =
+      preference == .cloud
+      ? nil
+      : await PTTLanguageIdentifier.shared.transcribe(pcm16k: audioData, language: language)
+    switch PTTTranscriptionRoutePolicy.decide(
+      preference: preference,
+      isAppleSilicon: AppState.isAppleSilicon,
+      localTranscript: localTranscript)
     {
+    case .local:
+      let local = localTranscript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       log("PushToTalkManager: local STT served the turn (parakeet v3, on-device, \(local.count) chars)")
       return TranscriptionService.BatchTranscriptionResult(
         transcript: local, provider: "parakeet-v3", model: "on-device")
+    case .localFailed:
+      log("PushToTalkManager: on-device STT produced no text and the engine is pinned to On-device")
+      throw PTTOnDeviceTranscriptionUnavailable()
+    case .localThenCloud, .cloud:
+      return try await TranscriptionService.batchTranscribe(
+        audioData: audioData, language: language, contextKeywords: contextKeywords)
     }
-    return try await TranscriptionService.batchTranscribe(
-      audioData: audioData, language: language, contextKeywords: contextKeywords)
   }
 
   private func makeDictationTranscriber(

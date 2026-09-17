@@ -341,6 +341,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
 
     // Refresh the "Auto" realtime-voice model pick from Artificial Analysis (daily, cached).
     AutoModelSelector.shared.refreshIfStale()
+    // The Voice Model picker is explicit now; a stored Auto becomes the pick it
+    // would have resolved to so the user can see and change the real choice.
+    RealtimeOmniSettings.migrateStoredAutoSelection()
 
     // After a Sparkle update, show a small "what's new" card in the corner of the
     // main window once. Delayed so the window/overlay exist to render it.
