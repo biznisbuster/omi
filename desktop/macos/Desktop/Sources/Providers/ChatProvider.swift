@@ -4062,6 +4062,17 @@ class ChatProvider: ObservableObject {
     // can otherwise replace the in-memory row between final rendering and this async commit.
     let message =
       acceptedMessage ?? messages.first(where: { $0.id == target.assistantMessageId })
+    // Model attribution is observed at completion, which is after admission and
+    // before terminalization. A terminal turn accepts only typed
+    // completion/resource appends, so this is the last legal moment to publish
+    // the served/requested model facts — without it, replay and relaunch lose
+    // the attribution that only lives in memory.
+    if let message, Self.hasModelAttribution(message.metadata) {
+      _ = await kernelTurnProjection.updateTurn(
+        surface: target.surface,
+        message: message,
+        ownerID: target.ownerID)
+    }
     let resultResources =
       queryResult.artifacts.map(ChatResource.artifact)
       + queryResult.completionDeltaArtifacts.map(ChatResource.artifact)
@@ -4080,17 +4091,14 @@ class ChatProvider: ObservableObject {
     }
     journalOwnerByMessageID.removeValue(forKey: target.assistantMessageId)
     target.onFinalized?(accepted)
-    // Served-model evidence is observed at completion, after admission: publish
-    // it as a durable non-regressing metadata update so replay and relaunch keep
-    // the attribution that in-memory metadata would otherwise lose.
-    if accepted,
-      let metadata = message?.metadata,
-      !metadata.modelsUsed.isEmpty || !metadata.providerTargets.isEmpty
-        || !(metadata.requestedModel ?? "").isEmpty
-    {
-      scheduleJournalUpdate(messageId: target.assistantMessageId)
-    }
     return accepted
+  }
+
+  /// True when a completed row carries model provenance worth journaling.
+  private static func hasModelAttribution(_ metadata: MessageMetadata?) -> Bool {
+    guard let metadata else { return false }
+    return !metadata.modelsUsed.isEmpty || !metadata.providerTargets.isEmpty
+      || !(metadata.requestedModel ?? "").isEmpty
   }
 
   // MARK: - Pending Attachments
