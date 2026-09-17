@@ -567,6 +567,9 @@ final class VoiceTurnCoordinator {
   private func schedule(turnID: VoiceTurnID, deadline: VoiceTurnDeadline, interval: TimeInterval) {
     let key = DeadlineKey(turnID: turnID, deadline: deadline)
     deadlineCancellations.removeValue(forKey: key)?.cancel()
+    log(
+      "VoiceTurnCoordinator: deadline scheduled turn=\(turnID.description) "
+        + "deadline=\(deadline.rawValue) after=\(String(format: "%.1f", interval))s")
     deadlineCancellations[key] = scheduler.schedule(deadline: deadline, after: interval) {
       [weak self] in
       guard let self else { return }

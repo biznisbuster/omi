@@ -1418,7 +1418,7 @@ struct VoiceTurnReducer {
       model.turn?.projection.isResponseWaiting = true
       cancel(.deferredCommit, in: &model, effects: &effects)
       cancel(.bargeInReplacement, in: &model, effects: &effects)
-      schedule(.providerResponse, after: deadlines.providerResponse, in: &model, effects: &effects)
+      schedule(.providerResponse, after: answerDeadline(for: turn.route), in: &model, effects: &effects)
 
     case .hubCommitClaimed:
       guard turn.phase == .finalizing, routeMatchesHub(turn.route) else {
@@ -1709,7 +1709,7 @@ struct VoiceTurnReducer {
         model.turn?.projection.isResponseWaiting = turn.pendingToolCallIDs.isEmpty
         if turn.pendingToolCallIDs.isEmpty {
           schedule(
-            .providerResponse, after: deadlines.providerResponse, in: &model, effects: &effects)
+            .providerResponse, after: answerDeadline(for: turn.route), in: &model, effects: &effects)
         }
       }
 
@@ -1848,7 +1848,7 @@ struct VoiceTurnReducer {
           model.turn?.projection.isThinking = true
           model.turn?.projection.isResponseWaiting = true
           schedule(
-            .providerResponse, after: deadlines.providerResponse, in: &model, effects: &effects)
+            .providerResponse, after: answerDeadline(for: turn.route), in: &model, effects: &effects)
         }
       } else {
         reschedulePendingToolsDeadline(in: &model, effects: &effects)
@@ -1926,7 +1926,7 @@ struct VoiceTurnReducer {
         model.turn?.projection.isResponseActive = false
         model.turn?.projection.isResponseWaiting = true
         schedule(
-          .providerResponse, after: deadlines.providerResponse, in: &model, effects: &effects)
+          .providerResponse, after: answerDeadline(for: turn.route), in: &model, effects: &effects)
       }
 
     case .playbackFailedScoped(_, let identity, let leaseID, _):
@@ -2118,7 +2118,7 @@ struct VoiceTurnReducer {
             model.turn?.phase = .awaitingResponse
             model.turn?.projection.isResponseWaiting = true
             schedule(
-              .providerResponse, after: deadlines.providerResponse, in: &model, effects: &effects)
+              .providerResponse, after: answerDeadline(for: turn.route), in: &model, effects: &effects)
           }
         case .keepPlaying:
           schedule(.playbackDrain, after: deadlines.playbackDrain, in: &model, effects: &effects)
