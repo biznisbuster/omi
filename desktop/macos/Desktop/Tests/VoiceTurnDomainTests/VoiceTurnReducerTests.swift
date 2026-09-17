@@ -2246,6 +2246,32 @@ final class VoiceTurnReducerTests: XCTestCase {
     XCTAssertEqual(model.duplicateTerminalCount, 0)
   }
 
+  /// A voice question answered by the chat/agent lane needs the long answer
+  /// budget: the model's first tool call can take longer than the hub-scale cap,
+  /// and the turn was killed before answering (observed live: first `bash` call
+  /// at 24.8s against a 20s deadline, so the user saw nothing).
+  func testChatLaneVoiceAnswerGetsTheLongDeadline() {
+    let deadlines = VoiceTurnReducer.Deadlines()
+    XCTAssertGreaterThan(
+      deadlines.chatLaneAnswer, deadlines.providerResponse,
+      "the chat/agent answer budget must exceed the realtime hub's cap")
+
+    let turnID = VoiceTurnID()
+    var model = reduce(.idle, .start(turnID: turnID, ownerID: nil, intent: .hold)).model
+    model = reduce(model, .selectRoute(turnID: turnID, route: .deepgramBatch)).model
+    model = reduce(model, .finalize(turnID: turnID)).model
+    model = reduce(model, .transcriptionStarted(turnID: turnID)).model
+    let reduction = reduce(model, .transcriptionFinal(turnID: turnID, text: "otvori brauzer"))
+
+    let scheduled = reduction.effects.compactMap { effect -> TimeInterval? in
+      guard case .scheduleDeadline(_, .providerResponse, let after) = effect else { return nil }
+      return after
+    }.first
+    XCTAssertEqual(
+      scheduled, deadlines.chatLaneAnswer,
+      "the chat/agent answer must not be cut off at the realtime hub's cap")
+  }
+
   func testNonHubPlaybackDrainCannotClaimProviderOrJournalCompletion() throws {
     let turnID = VoiceTurnID()
     var model = reduce(.idle, .start(turnID: turnID, ownerID: nil, intent: .hold)).model

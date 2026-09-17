@@ -1182,6 +1182,12 @@ struct VoiceTurnReducer {
     var hubWarm: TimeInterval = 1
     var transcription: TimeInterval = 12
     var providerResponse: TimeInterval = 20
+    /// Answer budget when the answer comes from the chat/agent lane instead of
+    /// the realtime hub. An agent answer can spend its first tens of seconds in
+    /// one tool call — observed live: the model's first `bash` call arrived at
+    /// 24.8s — and a voice turn killed at the hub-scale cap returns no answer
+    /// at all, so the user sees the turn do nothing.
+    var chatLaneAnswer: TimeInterval = 60
     var pendingTools: TimeInterval = 30
     var chatLaneTool: TimeInterval = 180
     var deferredCommit: TimeInterval = 8
@@ -1624,7 +1630,7 @@ struct VoiceTurnReducer {
       model.turn?.projection.isThinking = true
       model.turn?.projection.isResponseWaiting = true
       allocateProviderEffectIdentityIfNeeded(in: &model)
-      schedule(.providerResponse, after: deadlines.providerResponse, in: &model, effects: &effects)
+      schedule(.providerResponse, after: answerDeadline(for: turn.route), in: &model, effects: &effects)
 
     case .transcriptionFailed:
       terminate(&model, reason: .transcriptionFailed, effects: &effects)
@@ -2321,6 +2327,16 @@ struct VoiceTurnReducer {
     startJournalFinalizationIfNeeded(in: &model, effects: &effects)
     if completionFencesSatisfied(model.turn) {
       terminate(&model, reason: .success, effects: &effects)
+    }
+  }
+
+  /// The chat/agent lane gets the long answer budget; the realtime hub replies
+  /// in seconds and keeps the short cap so a dead socket falls back quickly
+  /// instead of holding the turn for a minute.
+  private func answerDeadline(for route: VoiceTurnRoute) -> TimeInterval {
+    switch route {
+    case .deepgramBatch, .omniSTT, .deepgramLive: return deadlines.chatLaneAnswer
+    case .hub, .hubWarmWait, .undecided, .onDeviceASR: return deadlines.providerResponse
     }
   }
 
