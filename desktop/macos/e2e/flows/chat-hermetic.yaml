@@ -106,6 +106,9 @@ covers:
   # client-direct BYOK environment is exempt from the managed quota, which is
   # what lets a paid-on-your-own-provider send complete here.
   - desktop/macos/Desktop/Sources/Chat/ChatQuotaAdmissionPolicy.swift
+  # The composer's Stop targets whichever turn is visible on this flow's shared
+  # timeline, so the stop contract rides the same chat path.
+  - desktop/macos/Desktop/Sources/Chat/ChatVisibleStopPolicy.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess+JITKnowledgeToolsGate.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeProcess.swift
   - desktop/macos/Desktop/Sources/Chat/AgentRuntimeBridgeLifecycle.swift
