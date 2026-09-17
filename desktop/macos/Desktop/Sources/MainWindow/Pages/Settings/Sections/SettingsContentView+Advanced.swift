@@ -5,6 +5,27 @@ import UniformTypeIdentifiers
 import WebKit
 
 extension SettingsContentView {
+  /// One read-only role line: what runs, and where the control for it lives.
+  private func modelRoleRow(_ title: String, value: String, hint: String) -> some View {
+    VStack(alignment: .leading, spacing: OmiSpacing.hairline) {
+      Text(title)
+        .scaledFont(size: OmiType.caption, weight: .medium)
+        .foregroundColor(Ink.primary)
+      HStack(spacing: OmiSpacing.xs) {
+        Text(value)
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+        Text("· \(hint)")
+          .scaledFont(size: OmiType.micro)
+          .foregroundColor(Ink.secondary)
+          .lineLimit(1)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
   func advancedCategoryHeader(title: String, icon: String) -> some View {
     HStack(spacing: OmiSpacing.sm) {
       Image(systemName: icon)
@@ -283,6 +304,68 @@ extension SettingsContentView {
             .foregroundColor(Ink.secondary)
             .fixedSize(horizontal: false, vertical: true)
           }
+        }
+      }
+
+      settingsCard(settingId: "aichat.modelroles") {
+        let voiceModel = RealtimeOmniSettings.shared.selectedProvider
+        let voiceMode = PTTVoiceMode(rawValue: pttVoiceMode) ?? .live
+        let chatProvider = APIKeyService.selectedBYOKLLMProvider
+        let chatModel = AgentRuntimeProcess.configuredClientDirectModel()
+        let chatValue =
+          [chatProvider?.displayName, chatModel, chatProvider == nil ? "Omi managed" : nil]
+          .compactMap { $0 }
+          .joined(separator: " · ")
+        let voiceValue = ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID)
+
+        VStack(alignment: .leading, spacing: OmiSpacing.sm) {
+          HStack {
+            Image(systemName: "list.bullet.rectangle")
+              .scaledFont(size: OmiType.subheading)
+              .foregroundColor(Ink.secondary)
+
+            Text("Model Roles")
+              .scaledFont(size: OmiType.subheading, weight: .semibold)
+              .foregroundColor(Ink.primary)
+
+            Spacer()
+          }
+
+          Text(
+            "What runs in each role right now. Live voice is one speech model doing all three; Transcript mode splits them."
+          )
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(Ink.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+
+          modelRoleRow(
+            "Voice (Live): hears, thinks, speaks",
+            value: "\(voiceModel.displayName) · \(voiceModel.modelID)",
+            hint: "Settings → Voice Model")
+          modelRoleRow(
+            "Voice transcription",
+            value: voiceMode == .transcript
+              ? PTTTranscriptionPreference.current.displayName
+              : "inside the Live voice model",
+            hint: voiceMode == .transcript
+              ? "Settings → Transcription"
+              : "Settings → Voice Answer Mode (switch to Transcript for a separate engine)")
+          modelRoleRow(
+            "Voice answer in Transcript mode",
+            value: chatValue,
+            hint: "Developer Keys")
+          modelRoleRow(
+            "Typed chat & agent runtime",
+            value: chatValue,
+            hint: "Developer Keys")
+          modelRoleRow(
+            "Reading answers aloud (TTS)",
+            value: voiceValue.description,
+            hint: "Settings → Floating Bar")
+          modelRoleRow(
+            "Background agents",
+            value: (BackgroundAgentProvider(rawValue: backgroundAgentProvider) ?? .omiManaged).displayName,
+            hint: "this pane")
         }
       }
 

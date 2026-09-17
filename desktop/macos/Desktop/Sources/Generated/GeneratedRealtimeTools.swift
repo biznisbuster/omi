@@ -299,7 +299,7 @@ enum GeneratedRealtimeTools {
   {
     "type": "function",
     "name": "spawn_agent",
-    "description": "Start canonical Omi background work. Visible runs appear as floating-bar pills. Use for multi-step work in the user's apps/browser/files that you cannot do directly.",
+    "description": "Start Omi background work in the user's apps, browser, or files. CALL THIS TOOL IMMEDIATELY in the same turn whenever the user asks you to DO something (open, play, click, search, download, write, run, or find something for them): announcing that you will start the work without calling this tool does nothing and the user sees nothing happen. Visible runs appear as floating-bar pills. Build a self-contained objective.",
     "parameters": {
       "type": "object",
       "properties": {

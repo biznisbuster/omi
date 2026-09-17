@@ -1,0 +1,3 @@
+{
+  "change": "Voice requests that ask for something to be done now call the background-agent tool immediately instead of only promising to start it"
+}
