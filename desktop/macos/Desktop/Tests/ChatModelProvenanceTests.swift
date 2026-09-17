@@ -173,6 +173,36 @@ final class ChatModelProvenanceTests: XCTestCase {
     XCTAssertEqual(turn.chatMessage().metadata?.modelAttributionSummary, "deepseek-v4.1-flash (requested)")
   }
 
+  func testJournalRoundTripKeepsRecognizerOnTheAssistantRowToo() throws {
+    var message = ChatMessage(
+      id: "assistant-voice-1",
+      clientTurnId: "voice:turn-9",
+      text: "Otvorio sam YouTube.",
+      sender: .ai
+    )
+    message.metadata = MessageMetadata(
+      modelsUsed: ["deepseek-v4.1-flash"],
+      sttSource: "local", sttEngine: "transcript-engine", sttModel: "whisper-turbo",
+      sttLanguage: "sr")
+
+    let write = message.journalWrite(origin: "floating_chat", status: .completed)
+    let turn = try XCTUnwrap(
+      KernelJournalTurn(
+        dictionary: write.dictionary.merging([
+          "conversationId": "conversation-1",
+          "turnSeq": 4,
+          "surfaceKind": "main_chat",
+          "externalRefKind": "session",
+          "externalRefId": "session-1",
+        ]) { current, _ in current }))
+
+    let restored = turn.chatMessage()
+    XCTAssertEqual(restored.metadata?.modelsUsed, ["deepseek-v4.1-flash"])
+    XCTAssertEqual(
+      restored.metadata?.sttSummary, "transcript-engine · whisper-turbo · sr",
+      "the answer row must keep naming the recognizer that heard the question")
+  }
+
   func testJournalUpdateResendsAttributionAndScreenContext() throws {
     var message = ChatMessage(
       id: "assistant-turn-2",

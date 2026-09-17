@@ -183,8 +183,6 @@ struct MessageMetadata: Equatable {
     guard let engine = sttEngine, !engine.isEmpty else { return nil }
     var parts = [engine]
     if let model = sttModel, !model.isEmpty { parts.append(model) }
-    // `on-device` is the local recognizer's model label; do not say it twice.
-    if sttSource == "local", sttModel != "on-device" { parts.append("on-device") }
     if let language = sttLanguage, !language.isEmpty { parts.append(language) }
     return parts.joined(separator: " · ")
   }

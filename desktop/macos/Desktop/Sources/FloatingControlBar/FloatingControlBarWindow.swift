@@ -4305,6 +4305,11 @@ class FloatingControlBarManager {
     AppDelegate.summonWindowTarget()?.openMainAppChat()
   }
 
+  /// Recognizer provenance for the voice turn about to be dispatched. Set by
+  /// PTT immediately before the send and consumed (cleared) at the dispatch
+  /// site, so a rejected or superseded send cannot leak it onto the next turn.
+  var pendingVoiceTranscription: RealtimeTranscriptProvenance?
+
   /// Open AI input with a pre-filled query and auto-send (used by PTT).
   func openAIInputWithQuery(
     _ query: String,
@@ -5440,6 +5445,8 @@ class FloatingControlBarManager {
     let currentTracer = QueryTracerContext.current
     currentTracer?.begin("pre_llm")
     let queryFromVoice = barWindow.state.currentQueryFromVoice
+    let voiceTranscription = pendingVoiceTranscription
+    pendingVoiceTranscription = nil
     let voiceCompletionToken =
       queryFromVoice
       ? VoiceTurnCoordinator.shared.nonHubCompletionToken()
@@ -5573,6 +5580,7 @@ class FloatingControlBarManager {
             model: selectedFloatingModel,
             systemPromptSuffix: notificationContextSuffix,
             systemPromptStyle: .floating,
+            voiceTranscription: voiceTranscription,
             surfaceRef: provider.mainChatSurfaceReference(),
             imageData: screenshotData,
             turnOwner: chatTurnOwner(for: .visible(fromVoice: queryFromVoice)),
@@ -5760,6 +5768,8 @@ class FloatingControlBarManager {
     // referred to.
     let voiceNotchCardContext = recentNotchCardVoiceContext()
 
+    let voiceTranscription = pendingVoiceTranscription
+    pendingVoiceTranscription = nil
     let clientTurnId = UUID().uuidString
     chatCancellable?.cancel()
     chatCancellable = provider.$messages
@@ -5790,6 +5800,7 @@ class FloatingControlBarManager {
           model: selectedFloatingModel,
           systemPromptSuffix: voiceNotchCardContext,
           systemPromptStyle: .floating,
+          voiceTranscription: voiceTranscription,
           surfaceRef: provider.mainChatSurfaceReference(),
           imageData: screenshotData,
           turnOwner: .floatingVoice,

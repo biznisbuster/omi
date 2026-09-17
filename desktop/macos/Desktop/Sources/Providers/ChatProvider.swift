@@ -4551,6 +4551,7 @@ class ChatProvider: ObservableObject {
     systemPromptSuffix: String? = nil,
     systemPromptPrefix: String? = nil,
     systemPromptStyle: ChatSystemPromptStyle = .main,
+    voiceTranscription: RealtimeTranscriptProvenance? = nil,
     surfaceRef: AgentSurfaceReference? = nil,
     imageData: Data? = nil,
     turnOwner: ChatTurnOwner = .mainChat,
@@ -5010,14 +5011,27 @@ class ChatProvider: ObservableObject {
     let attachmentEvidence = await ChatAttachmentEvidence.capture(
       attachments: attachmentsForMessage
     )
+    // The recognizer that produced a voice turn's words is part of the turn's
+    // evidence: journal it on the user row, and carry it on the assistant row
+    // so the answer's caption can name what transcribed the question too.
+    func applyingVoiceTranscription(_ metadata: MessageMetadata?) -> MessageMetadata? {
+      guard let voiceTranscription else { return metadata }
+      var result = metadata ?? MessageMetadata()
+      result.sttSource = voiceTranscription.source.rawValue
+      result.sttEngine = voiceTranscription.engine
+      result.sttModel = voiceTranscription.model
+      result.sttLanguage = voiceTranscription.language
+      return result
+    }
     let userMessage = ChatMessage(
       id: userMessageId,
       clientTurnId: turnAttemptId,
       text: effectivePrompt,
       sender: .user,
-      metadata: attachmentEvidence.isEmpty
-        ? nil
-        : MessageMetadata(evidence: attachmentEvidence),
+      metadata: applyingVoiceTranscription(
+        attachmentEvidence.isEmpty
+          ? nil
+          : MessageMetadata(evidence: attachmentEvidence)),
       attachments: attachmentsForMessage,
       resources: userMessageResources,
       turnOwner: turnOwner
@@ -5029,6 +5043,7 @@ class ChatProvider: ObservableObject {
       text: "",
       sender: .ai,
       isStreaming: true,
+      metadata: applyingVoiceTranscription(nil),
       turnOwner: turnOwner
     )
     // Both visible halves enter the journal under one SQLite transaction.
@@ -5677,7 +5692,7 @@ class ChatProvider: ObservableObject {
             existing: messages[index].resources,
             adding: queryResult.artifacts.map(ChatResource.artifact) + deltaResources
           )
-          messages[index].metadata = MessageMetadata.fromCompletedTurn(
+          let completedMetadata = MessageMetadata.fromCompletedTurn(
             snapshot: kernelContext.snapshot,
             profile: kernelContext.session.profile,
             imageByteCount: effectiveImageData?.count,
@@ -5688,6 +5703,7 @@ class ChatProvider: ObservableObject {
             providerTargets: queryResult.providerTargets,
             requestedModel: AgentRuntimeProcess.configuredClientDirectModel()
           )
+          messages[index].metadata = applyingVoiceTranscription(completedMetadata)
           // Per-turn model provenance: the requested profile and adapter are
           // always known; the served identity is only reported when the
           // provider names one, so say "unreported" instead of guessing.

@@ -390,12 +390,20 @@ extension KernelJournalTurn {
       let models = metadata["modelsUsed"] as? [String] ?? []
       let providers = metadata["providerTargets"] as? [String] ?? []
       let requestedModel = metadata["requestedModel"] as? String
-      if !models.isEmpty || !providers.isEmpty || requestedModel != nil {
+      // A voice turn's recognizer rides on the assistant row too, so the
+      // answer's caption keeps naming what transcribed the question.
+      let stt = metadata["stt"] as? [String: Any]
+      let sttEngine = stt?["engine"] as? String
+      if !models.isEmpty || !providers.isEmpty || requestedModel != nil || sttEngine != nil {
         message.metadata = MessageMetadata(
           adapterId: origin == "realtime_voice" ? "realtime" : "",
           modelsUsed: models,
           providerTargets: providers,
-          requestedModel: requestedModel
+          requestedModel: requestedModel,
+          sttSource: stt?["source"] as? String,
+          sttEngine: sttEngine,
+          sttModel: stt?["model"] as? String,
+          sttLanguage: stt?["language"] as? String
         )
       }
     }

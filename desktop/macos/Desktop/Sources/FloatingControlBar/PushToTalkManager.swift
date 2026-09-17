@@ -1944,6 +1944,7 @@ class PushToTalkManager: ObservableObject {
     // openAIInputWithQuery / sendFollowUpQuery inherits the bound value.
     let tracer = activeTracer
     activeTracer = nil
+    FloatingControlBarManager.shared.pendingVoiceTranscription = lastVoiceTranscription
     let dispatch = {
       if wasFollowUp {
         log("PushToTalkManager: sending follow-up query (\(query.count) chars)")
@@ -2142,7 +2143,21 @@ class PushToTalkManager: ObservableObject {
   /// A connected socket is not necessarily admitted for this turn's immutable
   /// kernel context. Capture starts in either case; only an exact binding earns
   /// direct ingress, otherwise the controller buffers through its one handoff.
+  /// What decoded the last cascade transcript (engine, Parakeet, cloud batch).
+  /// Carried onto the journaled exchange so both the question row and the
+  /// answer row can name the recognizer that actually ran.
+  private var lastVoiceTranscription: RealtimeTranscriptProvenance?
+
+  private func noteVoiceTranscription(provider: String?, model: String?, language: String) {
+    let engine = provider ?? "unknown"
+    let source: RealtimeTranscriptProvenance.Source =
+      (engine == "parakeet-v3" || engine == "transcript-engine") ? .local : .provider
+    lastVoiceTranscription = RealtimeTranscriptProvenance(
+      source: source, engine: engine, model: model, language: language)
+  }
+
   private func startRealtimePTTRoute(startMicrophoneCapture: Bool) {
+    lastVoiceTranscription = nil
     let decision = PTTRoutePolicy.decide(
       isOnline: NetworkReachability.shared.isOnline,
       admitsImmediately: RealtimeHubController.shared.pttAdmission == .immediate,
@@ -3538,6 +3553,8 @@ class PushToTalkManager: ObservableObject {
             "stt_model": result.model ?? "unknown",
             "user_visible": false,
           ])
+        noteVoiceTranscription(
+          provider: result.provider, model: result.model, language: language)
         return TranscriptionService.BatchTranscriptionResult(
           transcript: result.transcript, provider: result.provider, model: result.model)
       } catch {
@@ -3563,19 +3580,24 @@ class PushToTalkManager: ObservableObject {
     case .local:
       let local = localTranscript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       log("PushToTalkManager: local STT served the turn (parakeet v3, on-device, \(local.count) chars)")
+      noteVoiceTranscription(provider: "parakeet-v3", model: "on-device", language: language)
       return TranscriptionService.BatchTranscriptionResult(
         transcript: local, provider: "parakeet-v3", model: "on-device")
     case .localFailed:
       log("PushToTalkManager: on-device STT produced no text and the engine is pinned to On-device")
       throw PTTOnDeviceTranscriptionUnavailable()
     case .localThenCloud, .cloud:
-      return try await TranscriptionService.batchTranscribe(
+      let cloud = try await TranscriptionService.batchTranscribe(
         audioData: audioData, language: language, contextKeywords: contextKeywords)
+      noteVoiceTranscription(
+        provider: cloud.provider, model: cloud.model, language: language)
+      return cloud
     }
   }
 
   private func makeDictationTranscriber(
-    keywords: [String], language: String, allowNetwork: Bool
+    keywords: [String], language: String, allowNetwork: Bool,
+    label: DictationRecognizerLabel = DictationRecognizerLabel()
   ) -> DictationTranscriber {
     DictationTranscriber(
       isOnline: allowNetwork && NetworkReachability.shared.isOnline,
@@ -3587,18 +3609,22 @@ class PushToTalkManager: ObservableObject {
             pcm16k: audio, language: language),
           !result.transcript.isEmpty
         {
+          label.set("transcript-engine/\(result.model ?? "-")")
           return result.transcript
         }
-        return try await TranscriptionService.batchTranscribe(
-          audioData: audio, language: language, contextKeywords: keywords
-        ).transcript
+        let cloud = try await TranscriptionService.batchTranscribe(
+          audioData: audio, language: language, contextKeywords: keywords)
+        label.set("omi-batch/\(cloud.provider ?? "unknown")/\(cloud.model ?? "-")")
+        return cloud.transcript
       },
       onDevice: { audio in
         // A breath after the last word is not a word, and decoding it invents one.
         guard VoiceTypeAudioTrim.speechBytes(in: audio) >= VoiceTypeAudioTrim.minimumDecodableSpeechBytes
         else { return nil }
-        return await PTTLanguageIdentifier.shared.transcribe(
+        let local = await PTTLanguageIdentifier.shared.transcribe(
           pcm16k: VoiceTypeAudioTrim.trimmingLeadingSilence(audio), language: language)
+        if local?.isEmpty == false { label.set("parakeet-v3/on-device") }
+        return local
       },
       didFallBack: { reason in
         await MainActor.run {
@@ -3659,17 +3685,19 @@ class PushToTalkManager: ObservableObject {
     isCurrent: () -> Bool
   ) async -> DictationRun {
     var run = DictationRun()
+    let recognizerLabel = DictationRecognizerLabel()
     if let knownTranscript {
       run.transcript = knownTranscript
-      run.transcriber = "route"
+      run.transcriber =
+        lastVoiceTranscription.map { "\($0.engine)/\($0.model ?? "-")" } ?? "route"
     } else {
       let outcome = await makeDictationTranscriber(
-        keywords: keywords, language: language, allowNetwork: allowNetwork
+        keywords: keywords, language: language, allowNetwork: allowNetwork, label: recognizerLabel
       ).outcome(for: audio)
       switch outcome {
       case .transcribed(let result):
         run.transcript = result.text
-        run.transcriber = result.source.rawValue
+        run.transcriber = recognizerLabel.label ?? result.source.rawValue
       case .unavailable(let reason):
         run.transcriptionUnavailableReason = reason
       case .cancelled:
@@ -3909,7 +3937,9 @@ class PushToTalkManager: ObservableObject {
         }
       }
       guard self.voiceTurnCoordinator.activeTurnID == turnID else { return }
-      if let hint = run.completion.statusHint {
+      if var hint = run.completion.statusHint {
+        // Name the recognizer that actually ran, beside the delivered text.
+        hint += " · via \(run.transcriber)"
         self.voiceTurnCoordinator.publish(.hintChanged(turnID: turnID, text: hint))
         try? await Task.sleep(nanoseconds: UInt64(Self.voiceTypingCopiedHintSeconds * 1_000_000_000))
         guard self.voiceTurnCoordinator.activeTurnID == turnID else { return }

@@ -12,6 +12,26 @@ import Foundation
 ///
 /// The recognizers are injected so the order can be exercised without a
 /// network or a model.
+/// Records which concrete recognizer served a dictation, for the closing hint
+/// ("Typed … via transcript-engine/whisper-turbo"). Filled inside the
+/// transcriber closures, read once the outcome is known.
+final class DictationRecognizerLabel: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: String?
+
+  func set(_ label: String) {
+    lock.lock()
+    value = label
+    lock.unlock()
+  }
+
+  var label: String? {
+    lock.lock()
+    defer { lock.unlock() }
+    return value
+  }
+}
+
 struct DictationTranscriber: Sendable {
 
   enum Source: String, Equatable, Sendable {

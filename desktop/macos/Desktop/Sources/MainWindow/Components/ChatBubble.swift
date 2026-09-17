@@ -491,10 +491,17 @@ struct ChatBubble: View {
     if message.sender == .ai, !message.isStreaming,
       let model = message.metadata?.modelAttributionSummary
     {
-      ChatRowProvenanceCaption(
-        systemImage: message.metadata?.adapterId == "realtime" ? "waveform" : "cpu",
-        text: model
-      )
+      HStack(spacing: OmiSpacing.md) {
+        ChatRowProvenanceCaption(
+          systemImage: message.metadata?.adapterId == "realtime" ? "waveform" : "cpu",
+          text: model
+        )
+        // A voice question names the recognizer beside the answering model, so
+        // one line says what heard the user and what answered them.
+        if let stt = message.metadata?.sttSummary {
+          ChatRowProvenanceCaption(systemImage: "mic.fill", text: stt)
+        }
+      }
     }
     if message.sender == .user, let stt = message.metadata?.sttSummary {
       ChatRowProvenanceCaption(systemImage: "mic.fill", text: "transcribed by \(stt)")
