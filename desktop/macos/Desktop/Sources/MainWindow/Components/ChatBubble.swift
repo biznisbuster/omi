@@ -496,10 +496,11 @@ struct ChatBubble: View {
           systemImage: message.metadata?.adapterId == "realtime" ? "waveform" : "cpu",
           text: model
         )
-        // A voice question names the recognizer beside the answering model, so
-        // one line says what heard the user and what answered them.
-        if let stt = message.metadata?.sttSummary {
-          ChatRowProvenanceCaption(systemImage: "mic.fill", text: stt)
+        // The recognizer already speaks for the question on its own row
+        // ("transcribed by …"), so the answer names only who answered and who
+        // read it aloud.
+        if let tts = message.metadata?.ttsSummary {
+          ChatRowProvenanceCaption(systemImage: "speaker.wave.2.fill", text: "spoken by \(tts)")
         }
       }
     }

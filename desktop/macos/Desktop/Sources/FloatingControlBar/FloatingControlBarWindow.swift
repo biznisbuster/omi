@@ -5804,6 +5804,13 @@ class FloatingControlBarManager {
     pendingVoiceTranscription = nil
     let clientTurnId = UUID().uuidString
     let voiceTurnDispatchedAt = Date()
+    var boundAnswerMessageID: String?
+    // The caption must name the model the user actually heard, including a
+    // fallback voice, so the attribution is attached when audio starts.
+    FloatingBarVoicePlaybackService.shared.onSpokenAttribution = { [weak provider] attribution in
+      guard let provider, let answerID = boundAnswerMessageID else { return }
+      provider.attachSpeechAttribution(messageId: answerID, attribution: attribution)
+    }
     chatCancellable?.cancel()
     chatCancellable = provider.$messages
       .receive(on: DispatchQueue.main)
@@ -5813,6 +5820,7 @@ class FloatingControlBarManager {
           let aiMessage = Self.voiceAnswerMessage(
             in: provider, clientTurnId: clientTurnId, since: voiceTurnDispatchedAt)
         else { return }
+        boundAnswerMessageID = aiMessage.id
         FloatingBarVoicePlaybackService.shared.updateStreamingResponseIfEnabled(
           aiMessage,
           isFinal: !aiMessage.isStreaming

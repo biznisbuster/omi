@@ -1,0 +1,3 @@
+{
+  "change": "The chat now names the voice that actually spoke each answer ('spoken by piper · sr_RS-…'), the recognizer caption stays only on the question, and Voice & Models separates the lanes cleanly: Voice Transcription (hears you), Voice Chat (answers you), and Voice Speech (speaks to you) with Provider / Model / Voice and a Play sample that reports its own errors"
+}

@@ -57,6 +57,13 @@ struct MessageMetadata: Equatable {
   var sttModel: String?
   /// Language the saved transcript was recognized as (BCP-47/ISO code).
   var sttLanguage: String?
+  /// Which speech model actually read this answer aloud: the configured
+  /// provider, its model, and the voice. Recorded at playback start, including
+  /// when a fallback spoke, so the caption names what the user heard rather
+  /// than what was merely selected.
+  var ttsProvider: String?
+  var ttsModel: String?
+  var ttsVoice: String?
 
   init(
     hasScreenshot: Bool = false,
@@ -79,7 +86,10 @@ struct MessageMetadata: Equatable {
     sttSource: String? = nil,
     sttEngine: String? = nil,
     sttModel: String? = nil,
-    sttLanguage: String? = nil
+    sttLanguage: String? = nil,
+    ttsProvider: String? = nil,
+    ttsModel: String? = nil,
+    ttsVoice: String? = nil
   ) {
     self.hasScreenshot = hasScreenshot
     self.screenshotSizeBytes = screenshotSizeBytes
@@ -102,6 +112,9 @@ struct MessageMetadata: Equatable {
     self.sttEngine = sttEngine
     self.sttModel = sttModel
     self.sttLanguage = sttLanguage
+    self.ttsProvider = ttsProvider
+    self.ttsModel = ttsModel
+    self.ttsVoice = ttsVoice
   }
 
   static func fromCompletedTurn(
@@ -184,6 +197,16 @@ struct MessageMetadata: Equatable {
     var parts = [engine]
     if let model = sttModel, !model.isEmpty { parts.append(model) }
     if let language = sttLanguage, !language.isEmpty { parts.append(language) }
+    return parts.joined(separator: " · ")
+  }
+
+  /// "Spoken by" line for an answer that was read aloud: provider · model ·
+  /// voice. Nil when no speech provenance was recorded.
+  var ttsSummary: String? {
+    guard let provider = ttsProvider, !provider.isEmpty else { return nil }
+    var parts = [provider]
+    if let model = ttsModel, !model.isEmpty { parts.append(model) }
+    if let voice = ttsVoice, !voice.isEmpty { parts.append(voice) }
     return parts.joined(separator: " · ")
   }
 

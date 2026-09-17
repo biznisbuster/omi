@@ -430,6 +430,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
           guard self.ownsCurrentSynthesisToken(token) else { return }
           self.isSynthesizing = false
           self.playbackTask = nil
+          self.pendingPlaybackAttribution = SpokenVoiceAttribution.forPlaybackMode(mode)
           self.audioQueue.append((audio: audioData, text: text))
           self.startPlaybackIfNeeded()
           self.startSynthesisIfNeeded(mode: mode)
@@ -490,9 +491,17 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
 
   /// Play a short preview of the given voice so the user can hear it
   /// when switching voices in settings.
-  func playVoiceSample(voiceID: String) {
+  /// The speech model behind the audio that most recently reached the speaker.
+  private(set) var lastSpokenAttribution: SpokenVoiceAttribution?
+  /// Called when audio actually starts playing, with the model that produced it.
+  var onSpokenAttribution: ((SpokenVoiceAttribution) -> Void)?
+  /// Set by the synthesis path immediately before `startPlayback`, consumed once.
+  private var pendingPlaybackAttribution: SpokenVoiceAttribution?
+
+  func playVoiceSample(voiceID: String, onOutcome: ((String?) -> Void)? = nil) {
     guard VoiceTurnCoordinator.shared.activeTurnID == nil else {
       log("FloatingBarVoicePlaybackService: voice sample denied while PTT owns audible output")
+      onOutcome?("A voice turn is active right now — try again in a moment.")
       return
     }
     resetPlaybackPipeline(clearMode: true)
@@ -505,6 +514,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
 
     if voice.isLocalSystem {
       enqueueSystemSpeech(phrase)
+      onOutcome?(nil)
       return
     }
 
@@ -519,6 +529,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
             guard let self else { return }
             guard self.playbackGeneration == generation else { return }
             self.startPlayback(audioData)
+            onOutcome?(nil)
           }
         } catch is CancellationError {
           return
@@ -526,6 +537,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
           if Self.isCancellation(error) { return }
           log(
             "FloatingBarVoicePlaybackService: local voice sample failed: \(error.localizedDescription)")
+          await MainActor.run { onOutcome?("Piper failed: \(error.localizedDescription)") }
         }
       }
       return
@@ -951,6 +963,11 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       }
       audioPlayer = player
       activePlayerFallbackText = fallbackText
+      if let attribution = pendingPlaybackAttribution {
+        lastSpokenAttribution = attribution
+        onSpokenAttribution?(attribution)
+        pendingPlaybackAttribution = nil
+      }
       log(
         "FloatingBarVoicePlaybackService: playback started bytes=\(data.count) rate=\(playbackRate)")
       if let lease = activePTTLease {
@@ -1319,6 +1336,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
   private func speakWithFallback(_ text: String, reason: String, allowLocal: Bool) {
     guard allowLocal, LocalVoiceSynthesisService.shared.isInstalled else {
       recordSelectedVoiceFallback(to: "system_voice_fallback", reason: reason, outcome: .degraded)
+      onSpokenAttribution?(SpokenVoiceAttribution(provider: "system-voice", model: nil, voice: nil))
       enqueueSystemSpeech(text)
       return
     }
@@ -1329,12 +1347,15 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
         await MainActor.run {
           guard let self, self.ownsCurrentSynthesisToken(token) else { return }
           self.recordSelectedVoiceFallback(to: "local_voice_fallback", reason: reason, outcome: .recovered)
+          self.pendingPlaybackAttribution = SpokenVoiceAttribution(
+            provider: "piper-fallback", model: LocalVoiceSynthesisService.modelID, voice: nil)
           self.startPlayback(audio, fallbackText: text)
         }
       } catch {
         await MainActor.run {
           guard let self else { return }
           self.recordSelectedVoiceFallback(to: "system_voice_fallback", reason: reason, outcome: .degraded)
+          self.onSpokenAttribution?(SpokenVoiceAttribution(provider: "system-voice", model: nil, voice: nil))
           self.enqueueSystemSpeech(text)
         }
       }
@@ -1427,11 +1448,16 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       request.httpBody = bodyData
       do {
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(statusCode) else {
+          // The provider's own reason is the useful part: a 429 quota, a bad
+          // key, or a retired model all read the same otherwise, and the user
+          // sees only "rejected" while a fallback voice plays instead.
           lastError = CredentialHealthError.providerAuth(
             provider: .gemini,
             mode: .byok,
-            message: "Gemini TTS rejected the request.")
+            message: Self.geminiTTSRejectionMessage(
+              model: model, statusCode: statusCode, body: data))
           continue
         }
         if let pcm = geminiAudioPCM(in: data), !pcm.isEmpty {
@@ -1446,6 +1472,23 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       }
     }
     throw lastError
+  }
+
+  /// A bounded, user-readable refusal from the Gemini TTS endpoint: status
+  /// plus the provider's own message when it sent one.
+  nonisolated static func geminiTTSRejectionMessage(
+    model: String,
+    statusCode: Int,
+    body: Data
+  ) -> String {
+    var detail = ""
+    if let payload = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+      let error = payload["error"] as? [String: Any],
+      let message = error["message"] as? String
+    {
+      detail = ": " + message.prefix(180)
+    }
+    return "Gemini TTS \(model) failed (\(statusCode))\(detail)"
   }
 
   /// The synthesized PCM inside a `generateContent` reply, or nil when the
@@ -1840,6 +1883,36 @@ private enum PlaybackMode: Sendable {
   case geminiTTS(voiceID: String)
   case localPiper
   case systemVoice(ShortcutSettings.VoiceOption)
+}
+
+/// Which speech model actually produced the audio a listener heard. Recorded at
+/// playback start — including fallbacks — so a caption can name the voice that
+/// spoke instead of the one that was merely configured.
+struct SpokenVoiceAttribution: Equatable, Sendable {
+  let provider: String
+  let model: String?
+  let voice: String?
+
+  var summary: String {
+    [provider, model, voice].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+
+  fileprivate static func forPlaybackMode(_ mode: PlaybackMode) -> SpokenVoiceAttribution {
+    switch mode {
+    case .openAI(let voiceID, _):
+      return SpokenVoiceAttribution(provider: "openai-tts", model: nil, voice: voiceID)
+    case .geminiTTS(let voiceID):
+      return SpokenVoiceAttribution(
+        provider: "gemini-tts",
+        model: FloatingBarVoicePlaybackService.selectedGeminiTTSModel,
+        voice: voiceID)
+    case .localPiper:
+      return SpokenVoiceAttribution(
+        provider: "piper", model: LocalVoiceSynthesisService.modelID, voice: nil)
+    case .systemVoice:
+      return SpokenVoiceAttribution(provider: "system-voice", model: nil, voice: nil)
+    }
+  }
 }
 
 /// The copy the floating bar shows in place of an answer it could not get.

@@ -513,6 +513,7 @@ struct SettingsContentView: View {
   @AppStorage(DefaultsKey.byokLLMProvider.rawValue) var devBYOKLLMProvider: String = ""
   @State var byokKeyStatuses: [BYOKProvider: BYOKValidator.Status] = [:]
   @State var byokActivationError: String?
+  @State var speechSampleStatus: String?
   @State var isInstallingLocalVoice: Bool = false
   @State var localVoiceInstallMessage: String?
   @State var localVoiceInstallError: String?

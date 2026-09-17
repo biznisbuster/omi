@@ -656,6 +656,11 @@ enum ChatBubbleIdentity {
       && lhs.metadata?.sttModel == rhs.metadata?.sttModel
       && lhs.metadata?.sttLanguage == rhs.metadata?.sttLanguage
       && lhs.metadata?.sttSource == rhs.metadata?.sttSource
+      // Speech attribution arrives at playback start, after the row rendered,
+      // so the always-visible "spoken by" caption must be part of identity.
+      && lhs.metadata?.ttsProvider == rhs.metadata?.ttsProvider
+      && lhs.metadata?.ttsModel == rhs.metadata?.ttsModel
+      && lhs.metadata?.ttsVoice == rhs.metadata?.ttsVoice
       // Direct field equality. This used to go through
       // `ChatContentBlockCodec.comparisonData`, which JSON-encoded BOTH sides of
       // every unchanged row — two serializations per bubble per transcript

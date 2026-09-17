@@ -394,7 +394,13 @@ extension KernelJournalTurn {
       // answer's caption keeps naming what transcribed the question.
       let stt = metadata["stt"] as? [String: Any]
       let sttEngine = stt?["engine"] as? String
-      if !models.isEmpty || !providers.isEmpty || requestedModel != nil || sttEngine != nil {
+      // Which speech model read this answer aloud, journaled when playback
+      // started so a restored conversation still names the voice that spoke.
+      let tts = metadata["tts"] as? [String: Any]
+      let ttsProvider = tts?["provider"] as? String
+      if !models.isEmpty || !providers.isEmpty || requestedModel != nil || sttEngine != nil
+        || ttsProvider != nil
+      {
         message.metadata = MessageMetadata(
           adapterId: origin == "realtime_voice" ? "realtime" : "",
           modelsUsed: models,
@@ -403,7 +409,10 @@ extension KernelJournalTurn {
           sttSource: stt?["source"] as? String,
           sttEngine: sttEngine,
           sttModel: stt?["model"] as? String,
-          sttLanguage: stt?["language"] as? String
+          sttLanguage: stt?["language"] as? String,
+          ttsProvider: ttsProvider,
+          ttsModel: tts?["model"] as? String,
+          ttsVoice: tts?["voice"] as? String
         )
       }
     }
@@ -518,6 +527,12 @@ extension ChatMessage {
       if let model = self.metadata?.sttModel, !model.isEmpty { stt["model"] = model }
       if let language = self.metadata?.sttLanguage, !language.isEmpty { stt["language"] = language }
       updateMetadata["stt"] = stt
+    }
+    if let provider = self.metadata?.ttsProvider, !provider.isEmpty {
+      var tts: [String: String] = ["provider": provider]
+      if let model = self.metadata?.ttsModel, !model.isEmpty { tts["model"] = model }
+      if let voice = self.metadata?.ttsVoice, !voice.isEmpty { tts["voice"] = voice }
+      updateMetadata["tts"] = tts
     }
     var metadataJSON: String?
     if !updateMetadata.isEmpty,

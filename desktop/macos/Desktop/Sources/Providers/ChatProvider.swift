@@ -1123,6 +1123,32 @@ class ChatProvider: ObservableObject {
   /// accepted or the user removes them.
   @Published var pendingComposerReferences: [ChatComposerReference] = []
   @Published var messages: [ChatMessage] = []
+
+  /// Record which speech model read this answer aloud. Live metadata for the
+  /// visible caption: the audio already played, so the provenance must move
+  /// with it rather than describe the configured voice.
+  @MainActor
+  func attachSpeechAttribution(messageId: String, attribution: SpokenVoiceAttribution) {
+    guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
+    var metadata = messages[index].metadata ?? MessageMetadata()
+    metadata.ttsProvider = attribution.provider
+    metadata.ttsModel = attribution.model
+    metadata.ttsVoice = attribution.voice
+    messages[index].metadata = metadata
+    objectWillChange.send()
+    log(
+      "ChatProvider: speech attribution attached message=\(messageId) spoken=\(attribution.summary)")
+    // The journal is the durable row: an update re-sends this metadata, so a
+    // later projection cannot replace the row and lose who spoke.
+    let message = messages[index]
+    let surface = mainChatSurfaceReference()
+    let ownerID = RuntimeOwnerIdentity.currentOwnerId() ?? ""
+    Task { [weak self] in
+      guard let self, !ownerID.isEmpty else { return }
+      _ = await self.kernelTurnProjection.updateTurn(
+        surface: surface, message: message, ownerID: ownerID)
+    }
+  }
   @Published var sessions: [ChatSession] = []
   @Published var currentSession: ChatSession? {
     didSet { restoreDraftForCurrentContextIfNeeded() }

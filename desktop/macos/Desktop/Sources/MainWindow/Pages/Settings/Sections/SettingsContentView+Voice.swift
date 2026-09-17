@@ -25,13 +25,14 @@ extension SettingsContentView {
         realtimeVoiceModelCard
         liveVoiceCard
       } else {
-        advancedCategoryHeader(title: "Transcript Voice", icon: "text.bubble")
+        advancedCategoryHeader(title: "Voice Transcription (hears you)", icon: "text.bubble")
         transcriptionModelCard
         dictationModelCard
+        advancedCategoryHeader(title: "Voice Chat (answers you)", icon: "bubble.left.and.text.bubble.right")
         chatModelCard
       }
 
-      advancedCategoryHeader(title: "Voice Output", icon: "speaker.wave.2")
+      advancedCategoryHeader(title: "Voice Speech (speaks to you)", icon: "speaker.wave.2")
       spokenVoiceCard(mode: mode)
       voiceSpeedSlider(settingId: "floatingbar.voicespeed")
 
@@ -424,11 +425,22 @@ extension SettingsContentView {
           }
           Spacer()
           Button("Play sample") {
+            speechSampleStatus = "Playing…"
             FloatingBarVoicePlaybackService.shared.playVoiceSample(
-              voiceID: shortcutSettings.selectedVoiceID)
+              voiceID: shortcutSettings.selectedVoiceID
+            ) { error in
+              speechSampleStatus = error
+            }
           }
           .buttonStyle(OmiButtonStyle(.primary, size: .compact))
           .accessibilityIdentifier("floatingbar.voice_sample")
+        }
+
+        if let speechSampleStatus {
+          Text(speechSampleStatus)
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(speechSampleStatus == "Playing…" ? Ink.secondary : SettingsInk.notice)
+            .fixedSize(horizontal: false, vertical: true)
         }
 
         // The speech lane's own provider and model. One place answers "which
@@ -451,12 +463,13 @@ extension SettingsContentView {
             .accessibilityIdentifier("floatingbar.speech_provider")
           }
 
-          if ShortcutSettings.provider(for: shortcutSettings.selectedVoiceID) == .geminiTTS {
-            HStack {
-              Text("Model")
-                .scaledFont(size: OmiType.caption, weight: .medium)
-                .foregroundColor(Ink.primary)
-              Spacer()
+          HStack {
+            Text("Model")
+              .scaledFont(size: OmiType.caption, weight: .medium)
+              .foregroundColor(Ink.primary)
+            Spacer()
+            switch ShortcutSettings.provider(for: shortcutSettings.selectedVoiceID) {
+            case .geminiTTS:
               SettingsMenuPicker(selection: $speechGeminiTTSModel) {
                 ForEach(FloatingBarVoicePlaybackService.geminiTTSModelOptions, id: \.self) {
                   model in
@@ -464,6 +477,18 @@ extension SettingsContentView {
                 }
               }
               .accessibilityIdentifier("floatingbar.speech_model")
+            case .openAI:
+              Text("OpenAI TTS (Omi proxy)")
+                .scaledFont(size: OmiType.caption)
+                .foregroundColor(Ink.secondary)
+            case .localPiper:
+              Text(LocalVoiceSynthesisService.modelID)
+                .scaledFont(size: OmiType.caption)
+                .foregroundColor(Ink.secondary)
+            case .localSystem:
+              Text("macOS system voice")
+                .scaledFont(size: OmiType.caption)
+                .foregroundColor(Ink.secondary)
             }
           }
 
@@ -499,6 +524,13 @@ extension SettingsContentView {
           .scaledFont(size: OmiType.caption)
           .foregroundColor(Ink.secondary)
           .fixedSize(horizontal: false, vertical: true)
+
+        if let last = FloatingBarVoicePlaybackService.shared.lastSpokenAttribution {
+          Text("Last spoken with: \(last.summary)")
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(Ink.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
     }
   }
@@ -574,8 +606,7 @@ extension SettingsContentView {
   private var speechModelLine: String {
     let voice = ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID)
     if voice.isGeminiTTS, let geminiVoice = voice.geminiVoice {
-      let model =
-        FloatingBarVoicePlaybackService.geminiTTSModels.first ?? "gemini-tts"
+      let model = FloatingBarVoicePlaybackService.selectedGeminiTTSModel
       return "Speaking model: \(model) · voice \(geminiVoice) (your Gemini key)"
     }
     if voice.isOpenAI, let openAIVoice = voice.openAIVoice {
