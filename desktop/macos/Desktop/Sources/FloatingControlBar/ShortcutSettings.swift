@@ -521,6 +521,7 @@ class ShortcutSettings: ObservableObject {
       case localSystem
       case openAI
       case localPiper
+      case geminiTTS
     }
 
     let id: String
@@ -534,6 +535,8 @@ class ShortcutSettings: ObservableObject {
     let preferredSystemVoiceNames: [String]
     /// Piper model id for `.localPiper` voices; nil for every other provider.
     let localModelID: String?
+    /// Prebuilt voice name for `.geminiTTS` voices; nil for every other provider.
+    let geminiVoice: String?
 
     var isLocalSystem: Bool {
       provider == .localSystem
@@ -545,6 +548,10 @@ class ShortcutSettings: ObservableObject {
 
     var isLocalPiper: Bool {
       provider == .localPiper
+    }
+
+    var isGeminiTTS: Bool {
+      provider == .geminiTTS
     }
   }
 
@@ -564,7 +571,8 @@ class ShortcutSettings: ObservableObject {
         "Speak in a deep, natural, grounded voice with calm confidence and smooth pacing.",
       preferredSystemVoiceIdentifiers: [],
       preferredSystemVoiceNames: [],
-      localModelID: nil
+      localModelID: nil,
+      geminiVoice: nil
     ),
     VoiceOption(
       id: openAIShimmerVoiceID,
@@ -577,7 +585,8 @@ class ShortcutSettings: ObservableObject {
         "Speak naturally in a warm, relaxed adult tone. Keep it conversational, calm, and human without sounding exaggerated.",
       preferredSystemVoiceIdentifiers: [],
       preferredSystemVoiceNames: [],
-      localModelID: nil
+      localModelID: nil,
+      geminiVoice: nil
     ),
     VoiceOption(
       id: "openai:coral",
@@ -590,7 +599,8 @@ class ShortcutSettings: ObservableObject {
         "Speak naturally in a warm, expressive human tone with smooth pacing and light emotional color.",
       preferredSystemVoiceIdentifiers: [],
       preferredSystemVoiceNames: [],
-      localModelID: nil
+      localModelID: nil,
+      geminiVoice: nil
     ),
     VoiceOption(
       id: "openai:nova",
@@ -603,7 +613,8 @@ class ShortcutSettings: ObservableObject {
         "Speak in a natural, friendly, confident tone with clear articulation and relaxed pacing.",
       preferredSystemVoiceIdentifiers: [],
       preferredSystemVoiceNames: [],
-      localModelID: nil
+      localModelID: nil,
+      geminiVoice: nil
     ),
     VoiceOption(
       id: localPiperVoiceID,
@@ -615,7 +626,62 @@ class ShortcutSettings: ObservableObject {
       openAIInstructions: nil,
       preferredSystemVoiceIdentifiers: [],
       preferredSystemVoiceNames: [],
-      localModelID: LocalVoiceSynthesisService.modelID
+      localModelID: LocalVoiceSynthesisService.modelID,
+      geminiVoice: nil
+    ),
+    // Gemini's dedicated TTS model, spoken client-direct with the user's own
+    // Gemini key — the cloud voice that works without an OpenAI key.
+    VoiceOption(
+      id: "gemini:kore",
+      name: "Gemini Kore",
+      gender: .female,
+      description: "Google Gemini TTS, natural Serbian",
+      provider: .geminiTTS,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Kore"
+    ),
+    VoiceOption(
+      id: "gemini:charon",
+      name: "Gemini Charon",
+      gender: .male,
+      description: "Google Gemini TTS, deep and grounded",
+      provider: .geminiTTS,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Charon"
+    ),
+    VoiceOption(
+      id: "gemini:aoede",
+      name: "Gemini Aoede",
+      gender: .female,
+      description: "Google Gemini TTS, light and expressive",
+      provider: .geminiTTS,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Aoede"
+    ),
+    VoiceOption(
+      id: "gemini:puck",
+      name: "Gemini Puck",
+      gender: .male,
+      description: "Google Gemini TTS, upbeat and clear",
+      provider: .geminiTTS,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Puck"
     ),
   ]
 

@@ -194,12 +194,43 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     let phrase: String
     if case .localPiper = mode {
       phrase = Self.localFillerPhrases.randomElement() ?? "Samo trenutak."
+    } else if case .geminiTTS = mode {
+      phrase = Self.localFillerPhrases.randomElement() ?? "Samo trenutak."
     } else {
       phrase = Self.fillerPhrases.randomElement() ?? "One moment."
     }
     switch mode {
     case .systemVoice:
       enqueueSystemSpeech(phrase)
+    case .geminiTTS(let voiceID):
+      isFillerSynthesizing = true
+      let generation = playbackGeneration
+      fillerTask = Task { [weak self] in
+        do {
+          let audioData = try await Self.synthesizeGeminiSpeech(text: phrase, voiceID: voiceID)
+          try Task.checkCancellation()
+          await MainActor.run {
+            guard let self else { return }
+            guard self.playbackGeneration == generation else { return }
+            self.isFillerSynthesizing = false
+            self.fillerTask = nil
+            guard !self.hasStartedRealPlayback else {
+              self.clearFloatingPillResponseGlowIfIdle()
+              return
+            }
+            self.startPlayback(audioData, fallbackText: phrase)
+            self.clearFloatingPillResponseGlowIfIdle()
+          }
+        } catch {
+          await MainActor.run {
+            guard let self else { return }
+            guard self.playbackGeneration == generation else { return }
+            self.isFillerSynthesizing = false
+            self.fillerTask = nil
+            self.clearFloatingPillResponseGlowIfIdle()
+          }
+        }
+      }
     case .openAI(let voiceID, let instructions):
       isFillerSynthesizing = true
       let generation = playbackGeneration
@@ -339,6 +370,10 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       )
     }
 
+    if selectedVoice.isGeminiTTS, let geminiVoice = selectedVoice.geminiVoice {
+      return .geminiTTS(voiceID: geminiVoice)
+    }
+
     if selectedVoice.isLocalPiper {
       return .localPiper
     }
@@ -364,7 +399,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     switch mode {
     case .systemVoice:
       enqueueSystemSpeech(text)
-    case .openAI, .localPiper:
+    case .openAI, .geminiTTS, .localPiper:
       synthesisQueue.append(text)
       startSynthesisIfNeeded(mode: mode)
     }
@@ -382,7 +417,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       do {
         let audioData: Data
         switch mode {
-        case .openAI, .localPiper:
+        case .openAI, .geminiTTS, .localPiper:
           audioData = try await Self.synthesizeSpeech(mode: mode, text: text)
         case .systemVoice:
           return
@@ -518,6 +553,30 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       return
     }
 
+    if voice.isGeminiTTS, let geminiVoice = voice.geminiVoice {
+      let generation = playbackGeneration
+      let sample = ShortcutSettings.localVoiceSampleText
+      playbackTask = Task { [weak self] in
+        do {
+          let audioData = try await Self.synthesizeGeminiSpeech(text: sample, voiceID: geminiVoice)
+          try Task.checkCancellation()
+          await MainActor.run {
+            guard let self else { return }
+            guard self.playbackGeneration == generation else { return }
+            self.startPlayback(audioData)
+          }
+        } catch is CancellationError {
+          return
+        } catch {
+          if Self.isCancellation(error) { return }
+          log(
+            "FloatingBarVoicePlaybackService: Gemini voice sample failed: \(error.localizedDescription)"
+          )
+        }
+      }
+      return
+    }
+
     enqueueSystemSpeech(phrase)
   }
 
@@ -542,7 +601,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     let mode = currentMode ?? resolvePlaybackMode()
     currentMode = mode
     switch mode {
-    case .openAI, .localPiper:
+    case .openAI, .geminiTTS, .localPiper:
       let token = currentSynthesisToken()
       isOneShotSynthesizing = true
       Task { [weak self] in
@@ -585,11 +644,37 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     let phrase: String
     if case .localPiper = mode {
       phrase = Self.randomLocalBackgroundAgentKickoffPhrase()
+    } else if case .geminiTTS = mode {
+      phrase = Self.randomLocalBackgroundAgentKickoffPhrase()
     } else {
       phrase = Self.randomBackgroundAgentKickoffPhrase()
     }
 
     switch mode {
+    case .geminiTTS(let voiceID):
+      let token = currentSynthesisToken()
+      isOneShotSynthesizing = true
+      Task { [weak self] in
+        do {
+          let audio = try await Self.synthesizeGeminiSpeech(text: phrase, voiceID: voiceID)
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            self.startPlayback(audio, fallbackText: phrase)
+          }
+        } catch {
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            guard
+              self.canUseCloudTTSFallback(
+                after: error, token: token, operation: "background_kickoff")
+            else { return }
+            self.speakWithFallback(
+              phrase, reason: Self.ttsFallbackReason(for: error), allowLocal: true)
+          }
+        }
+      }
     case .openAI(let voiceID, let instructions):
       let token = currentSynthesisToken()
       isOneShotSynthesizing = true
@@ -685,6 +770,28 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     }
 
     switch mode {
+    case .geminiTTS(let voiceID):
+      let localPhrase = kind.localPhrases.randomElement() ?? phrase
+      activeRealtimeSlowToolAcknowledgementTransport = "selected_voice"
+      let token = currentSynthesisToken()
+      isOneShotSynthesizing = true
+      Task { [weak self] in
+        do {
+          let audio = try await Self.synthesizeGeminiSpeech(text: localPhrase, voiceID: voiceID)
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            self.startPlayback(audio, fallbackText: localPhrase)
+          }
+        } catch {
+          await MainActor.run {
+            guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+            self.isOneShotSynthesizing = false
+            self.activeRealtimeSlowToolAcknowledgementTransport = "local_voice_fallback"
+            self.speakWithFallback(phrase, reason: "ack_clip_unavailable", allowLocal: true)
+          }
+        }
+      }
     case .openAI(let voiceID, let instructions):
       if let cached = Self.cachedRealtimeSlowToolAcknowledgementAudio(
         kind: kind,
@@ -880,6 +987,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     switch currentMode ?? resolvePlaybackMode() {
     case .localPiper: from = "local_piper"
     case .openAI: from = "openai_tts"
+    case .geminiTTS: from = "gemini_tts"
     case .systemVoice: from = "system_voice"
     }
     DesktopDiagnosticsManager.shared.recordFallback(
@@ -1234,11 +1342,103 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     case .openAI(let voiceID, let instructions):
       return try await synthesizeOpenAISpeech(
         text: text, voiceID: voiceID, instructions: instructions)
+    case .geminiTTS(let voiceID):
+      return try await synthesizeGeminiSpeech(text: text, voiceID: voiceID)
     case .localPiper:
       return try await LocalVoiceSynthesisService.shared.synthesize(text: text)
     case .systemVoice:
       throw CancellationError()
     }
+  }
+
+  /// Gemini's dedicated TTS model, spoken client-direct with the user's own
+  /// Gemini key. Returns a WAV container (24 kHz mono s16le) so the existing
+  /// playback path can feed it straight to `AVAudioPlayer`.
+  ///
+  /// This is the cloud voice that works without an OpenAI key, which is the
+  /// whole point: the voice picker used to offer OpenAI voices that silently
+  /// fell back to the system voice when no OpenAI key existed.
+  nonisolated static let geminiTTSModels = [
+    "gemini-3.1-flash-tts-preview",
+    "gemini-2.5-flash-preview-tts",
+  ]
+
+  private nonisolated static func synthesizeGeminiSpeech(
+    text: String,
+    voiceID: String
+  ) async throws -> Data {
+    guard
+      let key = APIKeyService.byokKey(.gemini)?
+        .trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty
+    else {
+      throw CredentialHealthError.providerAuth(
+        provider: .gemini,
+        mode: .byok,
+        message: "No Gemini key on this Mac. Add one in Developer API Keys."
+      )
+    }
+
+    let body: [String: Any] = [
+      "contents": [["parts": [["text": text]]]],
+      "generationConfig": [
+        "responseModalities": ["AUDIO"],
+        "speechConfig": ["voiceConfig": ["prebuiltVoiceConfig": ["voiceName": voiceID]]],
+      ],
+    ]
+    let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+    var lastError: Error = NSError(
+      domain: "omi.gemini.tts",
+      code: 1,
+      userInfo: [NSLocalizedDescriptionKey: "Gemini TTS produced no audio."])
+    for model in geminiTTSModels {
+      var request = URLRequest(
+        url: URL(
+          string:
+            "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(key)"
+        )!)
+      request.httpMethod = "POST"
+      request.timeoutInterval = 30
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.httpBody = bodyData
+      do {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+          lastError = CredentialHealthError.providerAuth(
+            provider: .gemini,
+            mode: .byok,
+            message: "Gemini TTS rejected the request.")
+          continue
+        }
+        if let pcm = geminiAudioPCM(in: data), !pcm.isEmpty {
+          return WAVContainer.pcm16(pcm: pcm, sampleRate: 24_000)
+        }
+        lastError = NSError(
+          domain: "omi.gemini.tts",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "Gemini TTS produced no audio."])
+      } catch {
+        lastError = error
+      }
+    }
+    throw lastError
+  }
+
+  /// The synthesized PCM inside a `generateContent` reply, or nil when the
+  /// candidate carried no audio part.
+  nonisolated static func geminiAudioPCM(in data: Data) -> Data? {
+    guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let candidates = payload["candidates"] as? [[String: Any]],
+      let parts = candidates.first?["content"] as? [String: Any],
+      let partList = parts["parts"] as? [[String: Any]]
+    else { return nil }
+    for part in partList {
+      guard let inline = part["inlineData"] as? [String: Any],
+        let encoded = inline["data"] as? String
+      else { continue }
+      return Data(base64Encoded: encoded)
+    }
+    return nil
   }
 
   private nonisolated static func synthesizeOpenAISpeech(
@@ -1613,6 +1813,7 @@ enum VoiceSynthesisFallbackPolicy {
 
 private enum PlaybackMode: Sendable {
   case openAI(voiceID: String, instructions: String)
+  case geminiTTS(voiceID: String)
   case localPiper
   case systemVoice(ShortcutSettings.VoiceOption)
 }

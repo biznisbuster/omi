@@ -371,6 +371,17 @@ extension SettingsContentView {
         if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isLocalPiper {
           localVoiceInstallRow
         }
+
+        if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isGeminiTTS,
+          APIKeyService.byokKey(.gemini) == nil
+        {
+          Text(
+            "This voice speaks through your Gemini API key. Add one in Advanced → Developer API Keys to hear it here; until then replies use the on-device or system voice."
+          )
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(SettingsInk.notice)
+          .fixedSize(horizontal: false, vertical: true)
+        }
       }
     }
   }

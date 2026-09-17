@@ -1,0 +1,3 @@
+{
+  "change": "Added Gemini TTS voices that speak through your own Gemini API key — the cloud voice that works without an OpenAI key — next to the OpenAI and on-device voices"
+}

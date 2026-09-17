@@ -90,4 +90,49 @@ final class FloatingBarVoiceResponseSettingsTests: XCTestCase {
     XCTAssertTrue(settings.shouldSpeakFloatingBarResponse(forVoiceQuery: true))
     XCTAssertTrue(settings.shouldSpeakFloatingBarResponse(forVoiceQuery: false))
   }
+
+  /// The voice picker must offer a cloud voice that works with the key a user
+  /// actually has: OpenAI voices silently fell back to the system voice without
+  /// an OpenAI key, and Gemini TTS is spoken client-direct with the Gemini key.
+  func testGeminiVoicesResolveToATTSProviderWithAPrebuiltVoice() throws {
+    let geminiVoices = ShortcutSettings.availableVoices.filter { $0.isGeminiTTS }
+    XCTAssertFalse(geminiVoices.isEmpty, "the picker must list at least one Gemini voice")
+    for voice in geminiVoices {
+      XCTAssertEqual(voice.provider, .geminiTTS)
+      XCTAssertNotNil(voice.geminiVoice, "\(voice.id) must name its prebuilt voice")
+      XCTAssertNil(voice.openAIVoice, "\(voice.id) is not an OpenAI voice")
+    }
+
+    let kore = ShortcutSettings.voiceOption(for: "gemini:kore")
+    XCTAssertTrue(kore.isGeminiTTS)
+    XCTAssertEqual(kore.geminiVoice, "Kore")
+    XCTAssertEqual(kore.description.contains("Gemini"), true)
+  }
+
+  @MainActor
+  func testGeminiAudioPartIsDecodedFromTheGenerateContentReply() throws {
+    let pcm = Data(repeating: 0x2A, count: 480)
+    let reply = try JSONSerialization.data(withJSONObject: [
+      "candidates": [
+        [
+          "content": [
+            "parts": [
+              [
+                "inlineData": [
+                  "mimeType": "audio/l16; rate=24000; channels=1",
+                  "data": pcm.base64EncodedString(),
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ])
+
+    let decoded = try XCTUnwrap(FloatingBarVoicePlaybackService.geminiAudioPCM(in: reply))
+    XCTAssertEqual(decoded, pcm)
+    XCTAssertNil(
+      FloatingBarVoicePlaybackService.geminiAudioPCM(in: Data(#"{"candidates":[]}"#.utf8)),
+      "a reply with no audio part must read as no audio, not as an empty take")
+  }
 }
