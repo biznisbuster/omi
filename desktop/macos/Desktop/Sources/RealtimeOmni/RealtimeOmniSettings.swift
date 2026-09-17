@@ -112,14 +112,16 @@ final class RealtimeOmniSettings {
   }
 
   /// The Voice Model picker no longer offers Auto. Freeze a stored Auto
-  /// selection to the pick it would have resolved to, so behavior does not
-  /// silently change and the model in use becomes a visible, user-owned choice.
+  /// selection — or the absent-value default, which was Auto — to the pick it
+  /// would have resolved to, so behavior does not silently change and the model
+  /// in use becomes a visible, user-owned choice.
   static func migrateStoredAutoSelection(defaults: UserDefaults = .standard) {
     let key = "realtimeOmniProvider"
-    guard defaults.string(forKey: key) == RealtimeOmniProvider.auto.rawValue else { return }
+    let stored = defaults.string(forKey: key)
+    guard stored == nil || stored == RealtimeOmniProvider.auto.rawValue else { return }
     let frozen = AutoModelSelector.shared.currentPick ?? .geminiFlashLive
     defaults.set(frozen.rawValue, forKey: key)
-    log("RealtimeOmniSettings: froze stored Auto voice model to \(frozen.rawValue)")
+    log("RealtimeOmniSettings: froze Auto voice model selection to \(frozen.rawValue)")
   }
 }
 
