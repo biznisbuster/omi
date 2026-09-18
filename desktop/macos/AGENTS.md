@@ -124,24 +124,23 @@ types (`TaskActionItem`, `PowerMonitor`, etc.) and needs a shared-models carve-o
 code in a feature directory (`Onboarding/`, `MainWindow/`, `Chat/`, etc.). CI
 enforces this via `scripts/check-sources-root-layout.py`.
 
-When carving out additional leaf modules, prefer bottom-up order (models and
-storage before UI) and wire `import` + `public` on the extracted target's API.
+When carving out leaf modules, prefer bottom-up order (models/storage before
+UI) and wire `import` + `public` on the extracted API.
 
 ### Bundled resources
 
-`.process("Resources")` caches its manifest: after adding a file under
-`Sources/Resources/`, touch `Desktop/Package.swift` or the build silently omits it.
-It may flatten subdirectories — search both roots (`OmiSoundAssetLocator`), never
-`Bundle.module`. Cinematic audio is generated: `scripts/make-onboarding-sounds.py`.
+After adding a file under `Sources/Resources/`, touch `Desktop/Package.swift` or
+the build silently omits it; it may flatten subdirectories, so search both roots
+(`OmiSoundAssetLocator`), never `Bundle.module`. Onboarding sounds are generated:
+`scripts/make-onboarding-sounds.py`.
 
 ### Swift Formatting
 
-Swift formatting uses a pinned `swift-format` binary (release 602.0.0 at commit
-`62eaad2`), bootstrapped from source via `scripts/swift-format-wrapper.sh`. The
-config lives at `Desktop/.swift-format` (2-space indent, 120-column limit).
-Generated sources under `Desktop/Sources/Generated/` are excluded from the
-formatter scope. Bootstrap once: `./scripts/swift-format-wrapper.sh bootstrap`.
-Lint the full scope: `./scripts/swift-format-wrapper.sh lint -r $(./scripts/swift-format-wrapper.sh scope)`.
+Pinned `swift-format` (602.0.0, commit `62eaad2`), bootstrapped via
+`scripts/swift-format-wrapper.sh`; config at `Desktop/.swift-format` (2-space,
+120 cols). Generated sources are excluded. Bootstrap once, then lint the full
+scope: `./scripts/swift-format-wrapper.sh bootstrap` and
+`... lint -r $(./scripts/swift-format-wrapper.sh scope)`.
 
 ### SwiftLint
 
@@ -150,10 +149,9 @@ build-tool plugin) through `scripts/swiftlint-wrapper.sh`. The wrapper pins the
 upstream 0.65.0 universal macOS release artifact by SHA-256 and caches the
 verified binary under `~/.cache/omi-swiftlint`; use
 `./scripts/swiftlint-wrapper.sh lint` to run the full configured scope.
-Generated sources and test fixtures remain excluded and the committed baseline
-is down-only. SwiftLint baseline locations are absolute, so the wrapper
-materializes a temporary baseline rooted at the current checkout before linting;
-do not hand-edit those paths to match a specific machine.
+Generated sources and test fixtures stay excluded and the committed baseline is
+down-only. Baseline paths are absolute; the wrapper materializes a
+checkout-rooted temporary baseline — never hand-edit them per machine.
 
 ### Synchronous state-machine callbacks
 
@@ -341,9 +339,9 @@ Fast path (skips web login and sidebar click-through):
 3. **Package boundary:** use `./run.sh --full` only for the first named launch, resource/entitlement/package/runtime input changes, or when `--fast-only` reports an expected fingerprint mismatch.
 4. **QA, commit, and PR readiness:** run `./scripts/omi-macos-dev doctor`, exercise the real user-facing path, then run the appropriate full component/PR contract.
 
-`omi-macos-dev` defaults to bounded JSON summaries so an agent can safely inspect a busy machine. Pass `--verbose` to the specific command for path-level records (for example, `clean plan --verbose`); cleanup always requires the exact current plan hash. The normal 14-day retention window can be deliberately bypassed with `--older-than 0` only when the operator has explicitly approved immediate cleanup.
+`omi-macos-dev` defaults to bounded JSON summaries for safe inspection of a busy machine; `--verbose` gives path-level records, and cleanup always requires the exact current plan hash (`--older-than 0` only with explicit operator approval).
 
-Never ask a user to test an unexercised path. A fast named-bundle launch plus a semantic bridge assertion is valid inner-loop evidence; a clean full bundle is release/QA evidence.
+Never ask a user to test an unexercised path: a named-bundle launch plus a bridge assertion is inner-loop evidence; a clean full bundle is release/QA evidence.
 
 ### After Implementing Changes
 
@@ -369,6 +367,13 @@ When touching desktop agent runtime, floating agent pills, realtime hub, PTT, or
 cd desktop/macos && ./scripts/agent-logic-harness.sh
 ```
 It is self-driving for agents: it runs the risky Swift lifecycle/state tests, focused agent runtime tests, exact `pi-mono-extension` package tests, and prints per-step runtime. Use `--swift-only`, `--node-only`, or `--skip-install` only when narrowing a failure.
+
+### Speech reader lane
+
+Transcript answers are read by `NativeAudioSpeechRenderer`: one code path for
+every reader model (only the id changes), ≤500-character period-cut turns, and
+model-agnostic completion. The Voice Live hub warms only in Voice Live mode.
+Contract: [`.github/agent-docs/desktop-speech-reader.md`](../../.github/agent-docs/desktop-speech-reader.md).
 
 ### Chat Continuity Write-Path Contract (INV-6)
 
