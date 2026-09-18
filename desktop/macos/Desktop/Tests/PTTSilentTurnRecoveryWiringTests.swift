@@ -68,9 +68,11 @@ final class PTTSilentTurnRecoveryWiringTests: XCTestCase {
       recoveryBody.contains("recordCaptureRebuild()"),
       "requestCoreAudioCaptureRecovery must not call Bluetooth-only recordCaptureRebuild")
 
-    // The two previously-unwired buffered paths must now participate.
+    // The two previously-unwired buffered paths must now participate. The
+    // warm-wait path carries the source as a parameter default, so the scrape
+    // matches the literal rather than one call-site spelling.
     XCTAssertTrue(source.contains("source: \"buffered_hub\""))
-    XCTAssertTrue(source.contains("source: \"warm_wait_fallback\""))
+    XCTAssertTrue(source.contains("warm_wait_fallback"))
   }
 
   private func managerSource() throws -> String {
