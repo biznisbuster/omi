@@ -13,6 +13,15 @@ extension RealtimeHubController {
   /// `userInitiated: true` = direct user intent (PTT, launch, input-return);
   /// see `admitWarmRequest` — passive callers cannot clear an away deferral.
   func ensureWarm(userInitiated: Bool = false) {
+    // Voice Live is the hub's only consumer. In Transcript mode a turn is
+    // STT → chat → TTS, so a warm Live session would upload the full chat
+    // context (observed: contextChars=35031 ≈ 10k tokens) to a model that never
+    // speaks — burning the user's provider quota for nothing. The reader lane
+    // (NativeAudioSpeechRenderer) is a different socket and is unaffected.
+    guard PTTVoiceMode.current == .live else {
+      log("RealtimeHub: warm skipped in Transcript mode (hub has no consumer)")
+      return
+    }
     guard !AppBuild.shouldDisableJITQARealtime else {
       log("RealtimeHub: JIT QA realtime disabled by OMI_JIT_QA_DISABLE_REALTIME")
       return
