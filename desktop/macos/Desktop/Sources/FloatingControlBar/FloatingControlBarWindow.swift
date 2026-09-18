@@ -3075,6 +3075,26 @@ class FloatingControlBarManager {
   private var durationCancellable: AnyCancellable?
   private var chatCancellable: AnyCancellable?
   private var historyChatProvider: ChatProvider?
+  /// The answer row whose audio is being spoken right now. The speech
+  /// attribution arrives when the first PCM buffer reaches the speaker, which
+  /// can be after a newer turn replaced the callback; binding through this
+  /// property keeps the caption on the row the user is hearing.
+  private var spokenAnswerMessageID: String?
+
+  /// Point the speech service's attribution at the row currently being spoken.
+  /// Installed by every surface that speaks an answer, so a typed answer gets
+  /// the same "spoken by …" caption a voice turn does.
+  func bindSpeechAttributionToCurrentAnswer(provider: ChatProvider) {
+    FloatingBarVoicePlaybackService.shared.onSpokenAttribution = {
+      [weak self, weak provider] attribution in
+      guard let self, let provider else { return }
+      guard let answerID = self.spokenAnswerMessageID else {
+        log("FloatingControlBarWindow: speech attribution dropped, no bound answer row")
+        return
+      }
+      provider.attachSpeechAttribution(messageId: answerID, attribution: attribution)
+    }
+  }
 
   /// Public read-only access to the floating bar's chat provider so the
   /// agent pills manager can inherit the working directory / model.
@@ -4238,6 +4258,8 @@ class FloatingControlBarManager {
           barWindow?.state.bindQuestionMessageId(userMessage.id)
         }
         if shouldPlayVoice {
+          self.spokenAnswerMessageID = aiMessage.id
+          self.bindSpeechAttributionToCurrentAnswer(provider: provider)
           FloatingBarVoicePlaybackService.shared.updateStreamingResponseIfEnabled(
             aiMessage,
             isFinal: !aiMessage.isStreaming
@@ -5508,6 +5530,7 @@ class FloatingControlBarManager {
       // the `tts_start` span when the first real audio reaches the speaker.
       FloatingBarVoicePlaybackService.shared.tracer = currentTracer
       FloatingBarVoicePlaybackService.shared.playFillerIfEnabled()
+      bindSpeechAttributionToCurrentAnswer(provider: provider)
     }
 
     // Provider is already initialized by ViewModelContainer at app launch
@@ -5537,6 +5560,7 @@ class FloatingControlBarManager {
           barWindow?.state.bindQuestionMessageId(userMessage.id)
         }
         if shouldPlayVoice {
+          self.spokenAnswerMessageID = aiMessage.id
           FloatingBarVoicePlaybackService.shared.updateStreamingResponseIfEnabled(
             aiMessage,
             isFinal: !aiMessage.isStreaming
@@ -5804,13 +5828,9 @@ class FloatingControlBarManager {
     pendingVoiceTranscription = nil
     let clientTurnId = UUID().uuidString
     let voiceTurnDispatchedAt = Date()
-    var boundAnswerMessageID: String?
     // The caption must name the model the user actually heard, including a
     // fallback voice, so the attribution is attached when audio starts.
-    FloatingBarVoicePlaybackService.shared.onSpokenAttribution = { [weak provider] attribution in
-      guard let provider, let answerID = boundAnswerMessageID else { return }
-      provider.attachSpeechAttribution(messageId: answerID, attribution: attribution)
-    }
+    bindSpeechAttributionToCurrentAnswer(provider: provider)
     chatCancellable?.cancel()
     chatCancellable = provider.$messages
       .receive(on: DispatchQueue.main)
@@ -5820,7 +5840,7 @@ class FloatingControlBarManager {
           let aiMessage = Self.voiceAnswerMessage(
             in: provider, clientTurnId: clientTurnId, since: voiceTurnDispatchedAt)
         else { return }
-        boundAnswerMessageID = aiMessage.id
+        self.spokenAnswerMessageID = aiMessage.id
         FloatingBarVoicePlaybackService.shared.updateStreamingResponseIfEnabled(
           aiMessage,
           isFinal: !aiMessage.isStreaming

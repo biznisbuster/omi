@@ -1129,7 +1129,20 @@ class ChatProvider: ObservableObject {
   /// with it rather than describe the configured voice.
   @MainActor
   func attachSpeechAttribution(messageId: String, attribution: SpokenVoiceAttribution) {
-    guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
+    // A journal projection can replace the bound row's id while its audio is
+    // still playing; the caption belongs to the answer the user is hearing, so
+    // fall back to the newest assistant row instead of dropping it silently.
+    let index: Int?
+    if let exact = messages.firstIndex(where: { $0.id == messageId }) {
+      index = exact
+    } else {
+      index = messages.lastIndex(where: { $0.sender == .ai })
+      if index != nil {
+        log(
+          "ChatProvider: speech attribution row \(messageId) not found, attached to newest answer instead")
+      }
+    }
+    guard let index else { return }
     var metadata = messages[index].metadata ?? MessageMetadata()
     metadata.ttsProvider = attribution.provider
     metadata.ttsModel = attribution.model
@@ -1137,7 +1150,7 @@ class ChatProvider: ObservableObject {
     messages[index].metadata = metadata
     objectWillChange.send()
     log(
-      "ChatProvider: speech attribution attached message=\(messageId) spoken=\(attribution.summary)")
+      "ChatProvider: speech attribution attached message=\(messages[index].id) spoken=\(attribution.summary)")
     // The journal is the durable row: an update re-sends this metadata, so a
     // later projection cannot replace the row and lose who spoke.
     let message = messages[index]
