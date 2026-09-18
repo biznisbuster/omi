@@ -6,6 +6,7 @@ app: non-prod
 covers:
   - desktop/macos/Desktop/Sources/Audio/LocalVoiceSynthesisService.swift
   - desktop/macos/Desktop/Sources/DesktopAutomationBridge+LocalVoice.swift
+  - desktop/macos/Desktop/Sources/FloatingControlBar/NativeAudioSpeechRenderer.swift
 preconditions:
   - auth_ready
 
@@ -41,6 +42,33 @@ steps:
       ok: true
 
   - id: S4
+    name: Return the picker to the shipped default voice
+    bridge.action:
+      name: select_voice
+      params:
+        voice_id: "openai:shimmer"
+    expect:
+      ok: true
+      result.detail.selected_voice_id: "openai:shimmer"
+      result.detail.voice_provider: "openAI"
+
+  - id: S5
+    name: Select a Gemini native-audio reading voice
+    # Selecting the voice runs the reader's own preview path
+    # (`NativeAudioSpeechRenderer.speak`); without a Gemini key on the harness Mac
+    # it fails fast and the picker keeps the selection, which is the contract
+    # this step asserts.
+    bridge.action:
+      name: select_voice
+      params:
+        voice_id: "native:charon"
+    expect:
+      ok: true
+      result.detail.selected_voice_id: "native:charon"
+      result.detail.voice_provider: "geminiNativeAudio"
+      result.detail.voice_name: "Gemini Native Charon"
+
+  - id: S6
     name: Return the picker to the shipped default voice
     bridge.action:
       name: select_voice
