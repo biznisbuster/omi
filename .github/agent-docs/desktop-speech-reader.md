@@ -79,6 +79,6 @@ tail).
 
 ## Tests
 
-`Desktop/Tests/NativeAudioSpeechRendererTests.swift` (scripted socket:
+`desktop/macos/Desktop/Tests/NativeAudioSpeechRendererTests.swift` (scripted socket:
 pipelining, completion signals, trailing audio, runaway caps, rotation) and
 `FloatingBarVoiceResponseSettingsTests` (voice/provider wiring).
