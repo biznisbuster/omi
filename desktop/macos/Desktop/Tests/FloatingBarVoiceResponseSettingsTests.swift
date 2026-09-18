@@ -109,6 +109,40 @@ final class FloatingBarVoiceResponseSettingsTests: XCTestCase {
     XCTAssertEqual(kore.description.contains("Gemini"), true)
   }
 
+  /// The native-audio lane exists so the user can read answers with the Live
+  /// model they already have quota for. It must offer exactly the voices the
+  /// Live picker offers, or the same-setting promise silently breaks.
+  func testNativeAudioVoicesMirrorTheLiveVoicePicker() {
+    let liveVoices = Set(RealtimeHubVoicePolicy.selectableGeminiVoices.map(\.name))
+    let nativeVoices = ShortcutSettings.availableVoices.filter { $0.isGeminiNativeAudio }
+
+    XCTAssertFalse(nativeVoices.isEmpty, "the picker must list native-audio voices")
+    XCTAssertEqual(
+      Set(nativeVoices.compactMap(\.geminiVoice)), liveVoices,
+      "every voice Voice Live offers must be selectable for the speech lane too")
+    for voice in nativeVoices {
+      XCTAssertEqual(voice.provider, .geminiNativeAudio)
+      XCTAssertNotNil(voice.geminiVoice, "\(voice.id) must name its prebuilt voice")
+      XCTAssertNil(voice.openAIVoice, "\(voice.id) is not an OpenAI voice")
+    }
+
+    let charon = ShortcutSettings.voiceOption(for: "native:charon")
+    XCTAssertTrue(charon.isGeminiNativeAudio)
+    XCTAssertEqual(charon.geminiVoice, "Charon")
+    XCTAssertEqual(
+      ShortcutSettings.provider(for: "native:charon"), .geminiNativeAudio,
+      "the settings provider picker maps by voice id")
+  }
+
+  func testGeminiNativeAudioProviderResolvesWithoutDisturbingTheDefault() {
+    XCTAssertEqual(
+      ShortcutSettings.defaultVoiceID(for: .geminiNativeAudio), "native:charon",
+      "switching the speech provider must land on its first offered voice")
+    XCTAssertEqual(
+      ShortcutSettings.defaultVoiceID, ShortcutSettings.openAIShimmerVoiceID,
+      "adding a native-audio provider must not change the default voice")
+  }
+
   @MainActor
   func testGeminiAudioPartIsDecodedFromTheGenerateContentReply() throws {
     let pcm = Data(repeating: 0x2A, count: 480)

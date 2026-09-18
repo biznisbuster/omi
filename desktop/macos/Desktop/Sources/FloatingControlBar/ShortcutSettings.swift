@@ -522,6 +522,7 @@ class ShortcutSettings: ObservableObject {
       case openAI
       case localPiper
       case geminiTTS
+      case geminiNativeAudio
     }
 
     let id: String
@@ -552,6 +553,10 @@ class ShortcutSettings: ObservableObject {
 
     var isGeminiTTS: Bool {
       provider == .geminiTTS
+    }
+
+    var isGeminiNativeAudio: Bool {
+      provider == .geminiNativeAudio
     }
   }
 
@@ -683,6 +688,75 @@ class ShortcutSettings: ObservableObject {
       localModelID: nil,
       geminiVoice: "Puck"
     ),
+    // The Live native-audio model the user hears in Voice Live, reused as the
+    // speech lane's reader. Same prebuilt voice catalog as Gemini TTS, but the
+    // Live model is the one with the user's own quota, and it streams the first
+    // audio chunk instead of returning one finished take.
+    VoiceOption(
+      id: "native:charon",
+      name: "Gemini Native Charon",
+      gender: .male,
+      description: "Gemini native audio, deep and calm",
+      provider: .geminiNativeAudio,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Charon"
+    ),
+    VoiceOption(
+      id: "native:kore",
+      name: "Gemini Native Kore",
+      gender: .female,
+      description: "Gemini native audio, warm and natural",
+      provider: .geminiNativeAudio,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Kore"
+    ),
+    VoiceOption(
+      id: "native:puck",
+      name: "Gemini Native Puck",
+      gender: .male,
+      description: "Gemini native audio, upbeat",
+      provider: .geminiNativeAudio,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Puck"
+    ),
+    VoiceOption(
+      id: "native:aoede",
+      name: "Gemini Native Aoede",
+      gender: .female,
+      description: "Gemini native audio, light",
+      provider: .geminiNativeAudio,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Aoede"
+    ),
+    VoiceOption(
+      id: "native:fenrir",
+      name: "Gemini Native Fenrir",
+      gender: .male,
+      description: "Gemini native audio, grounded",
+      provider: .geminiNativeAudio,
+      openAIVoice: nil,
+      openAIInstructions: nil,
+      preferredSystemVoiceIdentifiers: [],
+      preferredSystemVoiceNames: [],
+      localModelID: nil,
+      geminiVoice: "Fenrir"
+    ),
   ]
 
   static let localPiperVoiceID = "local:piper:\(LocalVoiceSynthesisService.modelID)"
@@ -715,6 +789,14 @@ class ShortcutSettings: ObservableObject {
     didSet {
       guard selectedVoiceID != oldValue else { return }
       UserDefaults.standard.set(selectedVoiceID, forKey: "shortcut_selectedVoiceID")
+      // One voice system for the Gemini voices: the reader and Voice Live share
+      // the same prebuilt voice catalog, so picking a native-audio voice here
+      // moves the Live voice with it instead of leaving two pickers disagreeing.
+      let picked = Self.voiceOption(for: selectedVoiceID)
+      if picked.isGeminiNativeAudio, let geminiVoice = picked.geminiVoice {
+        UserDefaults.standard.set(geminiVoice, forKey: RealtimeHubVoicePolicy.geminiVoiceDefaultsKey)
+        NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
+      }
       FloatingBarVoicePlaybackService.shared.playVoiceSample(voiceID: selectedVoiceID)
       FloatingBarVoicePlaybackService.shared.prewarmBackgroundAgentKickoffPhrases()
       FloatingBarVoicePlaybackService.shared.prewarmRealtimeSlowToolAcknowledgementPhrases()

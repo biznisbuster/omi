@@ -11,6 +11,32 @@ private final class UtteranceBox: @unchecked Sendable {
   init(_ value: AVSpeechUtterance) { self.value = value }
 }
 
+/// Thread-safe byte counter for the audio a native reader utterance delivered,
+/// so a failed chunk's fallback knows how much was already heard.
+private final class NativeAudioByteCounter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var bytes = 0
+
+  func add(_ count: Int) {
+    lock.lock()
+    bytes += count
+    lock.unlock()
+  }
+
+  var total: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return bytes
+  }
+}
+
+/// Outcome of one native reader utterance: its failure (nil on success) and,
+/// when it failed partway, only the text the listener has not heard.
+private struct NativeUtteranceResult {
+  let error: Error?
+  let remainingText: String?
+}
+
 /// User-facing acknowledgement is selected from the admitted slow tool, never
 /// from transcript text. This keeps the kernel as the only routing authority
 /// while ensuring the user hears something immediately after admission.
@@ -72,17 +98,9 @@ enum RealtimeSlowToolAcknowledgementKind: String, CaseIterable, Sendable {
 final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDelegate {
   static let shared = FloatingBarVoicePlaybackService()
 
-  // First chunk stays small so playback starts fast.
-  nonisolated private static let firstChunkMinimumLength = 40
-  nonisolated private static let firstChunkPreferredLength = 120
-  nonisolated private static let firstChunkEmergencyLength = 200
-  // Follow-up chunks are much larger so the response is stitched from fewer
-  // generated audio clips. Each chunk boundary carries leading/trailing silence,
-  // so fewer chunks means far less perceived pausing between sentences and
-  // paragraphs of a long answer.
-  nonisolated private static let followupChunkMinimumLength = 320
-  nonisolated private static let followupChunkPreferredLength = 520
-  nonisolated private static let followupChunkEmergencyLength = 800
+  // Chunk sizes live in `NativeSpeechChunking`: the finished-clip TTS modes use
+  // `.standard` (fewer, larger clips), the streaming reader uses the user's pick
+  // (small turns keep its voice steady).
   private var playbackRate: Float { ShortcutSettings.shared.voicePlaybackSpeed }
 
   nonisolated private static let voiceSampleText = "Hey, how is it going?"
@@ -145,6 +163,16 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
   private var isSynthesizing = false
   private var hasStartedRealPlayback = false
   private var hasEmittedFirstChunk = false
+  /// Utterances handed to the native-audio renderer and not yet completed.
+  /// Counted (not a bool) because a streaming filler and the answer it
+  /// acknowledges can overlap by design.
+  private var nativeAudioUtterancesOutstanding = 0
+  /// Lazily created streaming player for the native-audio lane. The dedicated
+  /// TTS modes keep using `AVAudioPlayer` over one finished clip.
+  private var nativeAudioPlayer: StreamingPCMPlayer?
+  /// True once the first audio chunk of the current response has started
+  /// playing, so attribution/tracer fire exactly once per response.
+  private var hasStartedNativeAudioPlayback = false
   private var audioPlayer: AVAudioPlayer?
   private var activePlayerFallbackText = ""
   private var playbackGeneration: UInt64 = 0
@@ -173,6 +201,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     if isFillerSynthesizing { return true }
     if isOneShotSynthesizing { return true }
     if isSynthesizing { return true }
+    if nativeAudioUtterancesOutstanding > 0 { return true }
+    if (nativeAudioPlayer?.scheduledBufferCount ?? 0) > 0 { return true }
     return !audioQueue.isEmpty || !synthesisQueue.isEmpty
   }
 
@@ -196,10 +226,26 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       phrase = Self.localFillerPhrases.randomElement() ?? "Samo trenutak."
     } else if case .geminiTTS = mode {
       phrase = Self.localFillerPhrases.randomElement() ?? "Samo trenutak."
+    } else if case .geminiNativeAudio = mode {
+      // The native-audio reader is chosen by a Serbian user precisely because
+      // it reads Serbian well; the acknowledgement matches the answer language.
+      phrase = Self.localFillerPhrases.randomElement() ?? "Samo trenutak."
     } else {
       phrase = Self.fillerPhrases.randomElement() ?? "One moment."
     }
     switch mode {
+    case .geminiNativeAudio(let voiceID):
+      isFillerSynthesizing = true
+      let generation = playbackGeneration
+      fillerTask = startNativeAudioUtterance(
+        text: phrase, voiceID: voiceID, mode: mode
+      ) { [weak self] _ in
+        guard let self else { return }
+        guard self.playbackGeneration == generation else { return }
+        self.isFillerSynthesizing = false
+        self.fillerTask = nil
+        self.clearFloatingPillResponseGlowIfIdle()
+      }
     case .systemVoice:
       enqueueSystemSpeech(phrase)
     case .geminiTTS(let voiceID):
@@ -301,15 +347,24 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
   func updateStreamingResponseIfEnabled(_ message: ChatMessage?, isFinal: Bool) {
     guard ShortcutSettings.shared.hasAnyFloatingBarVoiceAnswersEnabled else { return }
     guard let message else { return }
+    let text = Self.cleanedPlaybackText(from: message)
 
     if currentResponseID != message.id {
-      resetPlaybackPipeline(clearMode: false, notifyPTTDrain: true)
-      currentResponseID = message.id
-      interruptedResponseID = shouldInterruptNextResponse ? message.id : nil
-      shouldInterruptNextResponse = false
+      // A journal projection can replace the answer row's id while its audio is
+      // still playing (observed live: the same answer started over, in the same
+      // voice and then in the fallback voice). The same answer continuing under
+      // a new id is not a new response; only genuinely different text is.
+      let continuesPreviousAnswer = Self.answerContinues(previous: streamedText, new: text)
+      if continuesPreviousAnswer {
+        currentResponseID = message.id
+      } else {
+        resetPlaybackPipeline(clearMode: false, notifyPTTDrain: true)
+        currentResponseID = message.id
+        interruptedResponseID = shouldInterruptNextResponse ? message.id : nil
+        shouldInterruptNextResponse = false
+      }
     }
 
-    let text = Self.cleanedPlaybackText(from: message)
     guard !text.isEmpty, Self.shouldSpeak(text) else { return }
     if interruptedResponseID == message.id {
       streamedText = text
@@ -332,22 +387,37 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       return
     }
 
+    // Build the native-audio socket while the answer is still generating, so
+    // the first chunk of speech does not pay the connect handshake.
+    if case .geminiNativeAudio(let voiceID) = mode {
+      NativeAudioSpeechRenderer.shared.prewarm(voice: voiceID)
+    }
+
     if !text.hasPrefix(streamedText) {
       streamedText = ""
       bufferedText = ""
       synthesisQueue.removeAll()
       audioQueue.removeAll()
+      // The rewritten text must be chunked from scratch.
+      hasEmittedFirstChunk = false
     }
 
-    // Cancel filler and stop filler audio when first real chunk is ready
+    // Cancel filler and stop filler audio when first real chunk is ready. The
+    // native-audio reader is the exception: its filler is part of the same
+    // stream, and the answer's first chunk queues behind it, so cutting it
+    // would clip the acknowledgement mid-word and stall the queued answer.
     if !hasStartedRealPlayback && text.count > 0 {
       hasStartedRealPlayback = true
       tracer?.begin("tts_start")
-      fillerTask?.cancel()
-      fillerTask = nil
-      audioPlayer?.stop()
-      audioPlayer = nil
-      speechSynthesizer.stopSpeaking(at: .immediate)
+      if case .geminiNativeAudio = mode {
+        // The acknowledgement finishes on its own; nothing to stop.
+      } else {
+        fillerTask?.cancel()
+        fillerTask = nil
+        audioPlayer?.stop()
+        audioPlayer = nil
+        speechSynthesizer.stopSpeaking(at: .immediate)
+      }
     }
 
     if text.count > streamedText.count {
@@ -374,6 +444,10 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       return .geminiTTS(voiceID: geminiVoice)
     }
 
+    if selectedVoice.isGeminiNativeAudio, let geminiVoice = selectedVoice.geminiVoice {
+      return .geminiNativeAudio(voiceID: geminiVoice)
+    }
+
     if selectedVoice.isLocalPiper {
       return .localPiper
     }
@@ -381,24 +455,199 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     return .systemVoice(selectedVoice)
   }
 
+  /// Rough Serbian speech rate, used to estimate how much of a failed chunk was
+  /// already heard so the fallback never re-reads it from the start.
+  nonisolated static let nativeAudioCharactersPerSecond =
+    NativeAudioSpeechRenderer.nativeAudioCharactersPerSecond
+
+  /// Hand one chunk of text to the native-audio reader and keep the pipeline's
+  /// bookkeeping in one place: the outstanding count fences `isSpeaking` until
+  /// the server completes the turn, and audio chunks stream into
+  /// `ingestNativeAudioChunk` as they arrive. A failure reports how much of the
+  /// chunk was actually heard, so the fallback voice never re-reads it whole.
+  @discardableResult
+  private func startNativeAudioUtterance(
+    text: String,
+    voiceID: String,
+    mode: PlaybackMode,
+    onFinish: @escaping @MainActor (NativeUtteranceResult) -> Void
+  ) -> Task<Void, Never> {
+    nativeAudioUtterancesOutstanding += 1
+    let delivered = NativeAudioByteCounter()
+    // The service is a process-lifetime shared instance, so the strong capture
+    // costs nothing and keeps the Sendable closure simple. The utterance is
+    // bounded by the renderer's own timeout.
+    return Task { @MainActor in
+      let failure: Error?
+      do {
+        try await NativeAudioSpeechRenderer.shared.speak(text: text, voice: voiceID) { chunk in
+          delivered.add(chunk.count)
+          Task { @MainActor in
+            self.ingestNativeAudioChunk(chunk, mode: mode)
+          }
+        }
+        failure = nil
+      } catch {
+        failure = error
+      }
+      self.nativeAudioUtterancesOutstanding = max(0, self.nativeAudioUtterancesOutstanding - 1)
+      onFinish(
+        NativeUtteranceResult(
+          error: failure,
+          remainingText: failure.flatMap { _ in
+            Self.unspokenRemainder(of: text, deliveredBytes: delivered.total)
+          }))
+    }
+  }
+
+  /// The tail of `text` the listener has not heard yet, estimated from the audio
+  /// already delivered. Nil means the whole chunk was spoken (the fallback must
+  /// not repeat it) or too little is left to be worth another voice.
+  nonisolated static func unspokenRemainder(of text: String, deliveredBytes: Int) -> String? {
+    let spokenSeconds = Double(deliveredBytes) / 48_000
+    guard spokenSeconds >= 0.5 else { return text }
+    let spokenChars = min(text.count, Int(spokenSeconds * nativeAudioCharactersPerSecond))
+    guard spokenChars < text.count else { return nil }
+    let cut = text.index(text.startIndex, offsetBy: spokenChars)
+    let tail = text[cut...].drop { !$0.isWhitespace }
+    let trimmed = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.count >= 40 ? trimmed : nil
+  }
+
+  /// One streamed PCM buffer (24 kHz mono s16le) from the native-audio reader.
+  /// The first chunk carries the attribution and the `tts_start` span, exactly
+  /// like `startPlayback` does for the finished-clip modes.
+  private func ingestNativeAudioChunk(_ data: Data, mode: PlaybackMode) {
+    guard !data.isEmpty else { return }
+    if nativeAudioPlayer == nil {
+      let player = StreamingPCMPlayer(sampleRate: 24_000)
+      // The voice turn's drain deadline is an inactivity watchdog, not a
+      // maximum duration: it must be refreshed by physical playback progress or
+      // a long answer is cut off mid-word at the 30 s mark (observed live).
+      player.onPlaybackProgress = { [weak self] _ in
+        Task { @MainActor in
+          guard let self, let lease = self.activePTTLease else { return }
+          _ = VoiceTurnCoordinator.shared.noteOutputProgress(lease)
+        }
+      }
+      player.onPlaybackIdle = { [weak self] _ in
+        Task { @MainActor in self?.clearFloatingPillResponseGlowIfIdle() }
+      }
+      nativeAudioPlayer = player
+    }
+    if !hasStartedNativeAudioPlayback, !isFillerSynthesizing {
+      hasStartedNativeAudioPlayback = true
+      if case .geminiNativeAudio(let voiceID) = mode {
+        let attribution = SpokenVoiceAttribution(
+          provider: "gemini-native-audio",
+          model: NativeAudioSpeechRenderer.selectedModelID,
+          voice: voiceID)
+        lastSpokenAttribution = attribution
+        onSpokenAttribution?(attribution)
+        log(
+          "FloatingBarVoicePlaybackService: native-audio playback started voice=\(voiceID)")
+      }
+      if let lease = activePTTLease {
+        _ = VoiceTurnCoordinator.shared.noteOutputProgress(lease)
+      }
+      tracer?.end("tts_start")
+    }
+    _ = nativeAudioPlayer?.enqueue(data)
+  }
+
+  /// Silence the streaming lane before a finished-clip or system voice speaks,
+  /// so a mid-stream failure cannot overlap the fallback that replaces it.
+  private func stopNativeAudioPlayback() {
+    nativeAudioPlayer?.stop()
+  }
+
   private func drainBufferedText(isFinal: Bool, mode: PlaybackMode) {
+    let profile = Self.chunkingProfile(for: mode)
+    // The final flush is still chunked for the reader: emitting the whole tail
+    // as one turn is what made the voice drift and outlive the output watchdog.
+    let flushNow = Self.finalFlushIsWholeBuffer(
+      bufferedText, isFinal: isFinal, profile: profile)
     while let boundary = Self.nextChunkBoundary(
-      in: bufferedText, isFinal: isFinal, isFirstChunk: !hasEmittedFirstChunk)
+      in: bufferedText, isFinal: flushNow, isFirstChunk: !hasEmittedFirstChunk, profile: profile)
     {
       let chunk = String(bufferedText[..<boundary]).trimmingCharacters(in: .whitespacesAndNewlines)
       bufferedText = String(bufferedText[boundary...]).trimmingCharacters(
         in: .whitespacesAndNewlines)
 
-      guard !chunk.isEmpty, Self.shouldSpeak(chunk) else { continue }
+      // A chunk with no letters or digits (a lone punctuation mark from a split
+      // boundary) is not worth a Live turn.
+      guard !chunk.isEmpty, chunk.rangeOfCharacter(from: .alphanumerics) != nil,
+        Self.shouldSpeak(chunk)
+      else { continue }
+      let wasFirstChunk = !hasEmittedFirstChunk
       hasEmittedFirstChunk = true
       enqueueChunk(chunk, mode: mode)
+      _ = wasFirstChunk
     }
+  }
+
+  /// Production seam (internal for tests): whether a message under a new row id
+  /// is the same answer continuing, rather than a new answer to speak from the
+  /// start.
+  nonisolated static func answerContinues(previous: String, new: String) -> Bool {
+    !previous.isEmpty && new.hasPrefix(previous)
+  }
+
+  /// A two-part turn: up to 500 characters, ending at the last period inside
+  /// that window. Nothing is emitted while the text is shorter than the window
+  /// unless the answer is complete — splitting early is what gave a short
+  /// answer two turns with an audible pause between them. Commas and dashes are
+  /// not boundaries, and a sentence longer than the window is cut at a word.
+  nonisolated static func twoPartBoundary(in text: String, isFinal: Bool) -> String.Index? {
+    let maximumCharacters = 500
+    if text.count <= maximumCharacters { return isFinal ? text.endIndex : nil }
+
+    let limit = text.index(text.startIndex, offsetBy: maximumCharacters)
+    let window = text[..<limit]
+    if let lastPeriod = window.lastIndex(of: ".") {
+      return text.index(after: lastPeriod)
+    }
+    if let whitespace = window.lastIndex(where: \.isWhitespace) { return whitespace }
+    return limit
+  }
+
+  /// Whether a completed answer's tail may flush as one turn. Production seam
+  /// (internal for tests): a tail larger than the profile's limit keeps
+  /// splitting instead of becoming one long utterance.
+  nonisolated static func finalFlushIsWholeBuffer(
+    _ text: String, isFinal: Bool, profile: NativeSpeechChunking
+  ) -> Bool {
+    isFinal && text.count <= profile.finalFlushLimit
+  }
+
+  /// Every mode keeps the shared TTS chunking except the reader, which reads
+  /// its own style (small turns keep the voice steady).
+  private nonisolated static func chunkingProfile(for mode: PlaybackMode) -> NativeSpeechChunking {
+    if case .geminiNativeAudio = mode { return NativeSpeechChunking.current }
+    return .standard
   }
 
   private func enqueueChunk(_ text: String, mode: PlaybackMode) {
     switch mode {
     case .systemVoice:
       enqueueSystemSpeech(text)
+    case .geminiNativeAudio(let voiceID):
+      // Pipelined: the reader gets every chunk as soon as it exists, so the
+      // server can queue the next turn while the current one is still speaking.
+      // Nothing waits on the previous turn, which is what removes the joins.
+      startNativeAudioUtterance(
+        text: text, voiceID: voiceID, mode: mode
+      ) { [weak self] result in
+        guard let self else { return }
+        if let error = result.error, !Self.isCancellation(error) {
+          log(
+            "FloatingBarVoicePlaybackService: native-audio chunk failed, falling back: \(error.localizedDescription)"
+          )
+          self.stopNativeAudioPlayback()
+          self.speakFallbackRemainder(result.remainingText, fullText: text, error: error)
+        }
+        self.clearFloatingPillResponseGlowIfIdle()
+      }
     case .openAI, .geminiTTS, .localPiper:
       synthesisQueue.append(text)
       startSynthesisIfNeeded(mode: mode)
@@ -421,7 +670,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
         switch mode {
         case .openAI, .geminiTTS, .localPiper:
           audioData = try await Self.synthesizeSpeech(mode: mode, text: text)
-        case .systemVoice:
+        case .systemVoice, .geminiNativeAudio:
           return
         }
         try Task.checkCancellation()
@@ -591,6 +840,26 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       return
     }
 
+    if voice.isGeminiNativeAudio, let geminiVoice = voice.geminiVoice {
+      let generation = playbackGeneration
+      let sample = ShortcutSettings.localVoiceSampleText
+      playbackTask = startNativeAudioUtterance(
+        text: sample, voiceID: geminiVoice, mode: .geminiNativeAudio(voiceID: geminiVoice)
+      ) { [weak self] result in
+        guard let self, self.playbackGeneration == generation else { return }
+        if let error = result.error {
+          if Self.isCancellation(error) { return }
+          log(
+            "FloatingBarVoicePlaybackService: native-audio voice sample failed: \(error.localizedDescription)"
+          )
+          onOutcome?(error.localizedDescription)
+        } else {
+          onOutcome?(nil)
+        }
+      }
+      return
+    }
+
     enqueueSystemSpeech(phrase)
   }
 
@@ -641,6 +910,21 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
           }
         }
       }
+    case .geminiNativeAudio(let voiceID):
+      isOneShotSynthesizing = true
+      playbackTask = startNativeAudioUtterance(
+        text: trimmed, voiceID: voiceID, mode: mode
+      ) { [weak self] result in
+        guard let self else { return }
+        self.isOneShotSynthesizing = false
+        if let error = result.error, !Self.isCancellation(error) {
+          log(
+            "FloatingBarVoicePlaybackService: native-audio one-shot failed; rendering the same response with the best "
+              + "available voice reason=\(Self.ttsFallbackReason(for: error))")
+          self.stopNativeAudioPlayback()
+          self.speakFallbackRemainder(result.remainingText, fullText: trimmed, error: error)
+        }
+      }
     case .systemVoice:
       enqueueSystemSpeech(trimmed)
     }
@@ -660,11 +944,25 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       phrase = Self.randomLocalBackgroundAgentKickoffPhrase()
     } else if case .geminiTTS = mode {
       phrase = Self.randomLocalBackgroundAgentKickoffPhrase()
+    } else if case .geminiNativeAudio = mode {
+      phrase = Self.randomLocalBackgroundAgentKickoffPhrase()
     } else {
       phrase = Self.randomBackgroundAgentKickoffPhrase()
     }
 
     switch mode {
+    case .geminiNativeAudio(let voiceID):
+      isOneShotSynthesizing = true
+      playbackTask = startNativeAudioUtterance(
+        text: phrase, voiceID: voiceID, mode: mode
+      ) { [weak self] result in
+        guard let self else { return }
+        self.isOneShotSynthesizing = false
+        if let error = result.error, !Self.isCancellation(error) {
+          self.stopNativeAudioPlayback()
+          self.speakFallbackRemainder(result.remainingText, fullText: phrase, error: error)
+        }
+      }
     case .geminiTTS(let voiceID):
       let token = currentSynthesisToken()
       isOneShotSynthesizing = true
@@ -748,6 +1046,27 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     }
   }
 
+  /// Speak what a failed native chunk left unspoken. When the estimate says the
+  /// whole chunk was already heard, the fallback stays silent: the listener must
+  /// never hear the same text twice in two voices (observed live: Gemini's first
+  /// part, then Piper repeating it from the start).
+  private func speakFallbackRemainder(
+    _ remainingText: String?,
+    fullText: String,
+    error: Error,
+    reason: String? = nil
+  ) {
+    guard let remainingText else {
+      log(
+        "FloatingBarVoicePlaybackService: native-audio chunk already heard; not replaying it in the fallback voice")
+      return
+    }
+    speakWithFallback(
+      remainingText,
+      reason: reason ?? Self.ttsFallbackReason(for: error),
+      allowLocal: true)
+  }
+
   /// Speak the accepted slow-tool acknowledgement without waiting on realtime
   /// provider audio. A shipped clip for the session's exact provider voice is
   /// preferred; the selected batch-TTS cache and system voice remain fallbacks.
@@ -784,6 +1103,23 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     }
 
     switch mode {
+    case .geminiNativeAudio(let voiceID):
+      let localPhrase = kind.localPhrases.randomElement() ?? phrase
+      activeRealtimeSlowToolAcknowledgementTransport = "selected_voice"
+      isOneShotSynthesizing = true
+      playbackTask = startNativeAudioUtterance(
+        text: localPhrase, voiceID: voiceID, mode: mode
+      ) { [weak self] result in
+        guard let self else { return }
+        self.isOneShotSynthesizing = false
+        if let error = result.error, !Self.isCancellation(error) {
+          self.activeRealtimeSlowToolAcknowledgementTransport = "local_voice_fallback"
+          self.stopNativeAudioPlayback()
+          self.speakFallbackRemainder(
+            result.remainingText, fullText: localPhrase, error: error,
+            reason: "ack_clip_unavailable")
+        }
+      }
     case .geminiTTS(let voiceID):
       let localPhrase = kind.localPhrases.randomElement() ?? phrase
       activeRealtimeSlowToolAcknowledgementTransport = "selected_voice"
@@ -943,6 +1279,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
   }
 
   private func startPlayback(_ data: Data, fallbackText: String = "") {
+    // A finished clip and the streaming lane must never overlap.
+    stopNativeAudioPlayback()
     do {
       if UserDefaults.standard.bool(forKey: "forceTTSPlaybackFail") {
         throw NSError(domain: "TTSPlayback", code: -1, userInfo: [NSLocalizedDescriptionKey: "forced playback failure"])
@@ -1009,6 +1347,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     case .localPiper: from = "local_piper"
     case .openAI: from = "openai_tts"
     case .geminiTTS: from = "gemini_tts"
+    case .geminiNativeAudio: from = "gemini_native_audio"
     case .systemVoice: from = "system_voice"
     }
     DesktopDiagnosticsManager.shared.recordFallback(
@@ -1101,6 +1440,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       clearFloatingPillResponseGlowIfIdle()
       return
     }
+    // The system voice is the last resort; it never talks over a stream.
+    stopNativeAudioPlayback()
     let utterance = AVSpeechUtterance(string: text)
     utterance.rate = Self.systemSpeechRate(playbackSpeed: playbackRate)
     utterance.pitchMultiplier = 1.02
@@ -1201,6 +1542,13 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     fillerTask = nil
     isFillerSynthesizing = false
     isOneShotSynthesizing = false
+    // The native-audio lane is torn down through its own owner: the renderer
+    // keeps its warm socket but abandons the in-flight turn, and the streaming
+    // player drops the buffered tail so a superseded answer cannot be heard.
+    NativeAudioSpeechRenderer.shared.cancelInFlight()
+    nativeAudioUtterancesOutstanding = 0
+    hasStartedNativeAudioPlayback = false
+    nativeAudioPlayer?.stop()
     if clearMode {
       currentMode = nil
       // Drop the tracer only on full teardown. interruptCurrentResponse uses
@@ -1340,12 +1688,22 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       enqueueSystemSpeech(text)
       return
     }
+    // Keep the output lease alive through the local synthesis. Without this the
+    // native lane's failed turn can drain and terminalize while Piper is still
+    // preparing the audio, and the fallback is dropped as stale — the user
+    // hears the answer stop mid-sentence (observed live when the Live session
+    // was cut by quota).
+    isOneShotSynthesizing = true
     let token = currentSynthesisToken()
     Task { [weak self] in
       do {
         let audio = try await LocalVoiceSynthesisService.shared.synthesize(text: text)
         await MainActor.run {
-          guard let self, self.ownsCurrentSynthesisToken(token) else { return }
+          guard let self, self.ownsCurrentSynthesisToken(token) else {
+            self?.isOneShotSynthesizing = false
+            return
+          }
+          self.isOneShotSynthesizing = false
           self.recordSelectedVoiceFallback(to: "local_voice_fallback", reason: reason, outcome: .recovered)
           self.pendingPlaybackAttribution = SpokenVoiceAttribution(
             provider: "piper-fallback", model: LocalVoiceSynthesisService.modelID, voice: nil)
@@ -1354,6 +1712,7 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       } catch {
         await MainActor.run {
           guard let self else { return }
+          self.isOneShotSynthesizing = false
           self.recordSelectedVoiceFallback(to: "system_voice_fallback", reason: reason, outcome: .degraded)
           self.onSpokenAttribution?(SpokenVoiceAttribution(provider: "system-voice", model: nil, voice: nil))
           self.enqueueSystemSpeech(text)
@@ -1371,7 +1730,8 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       return try await synthesizeGeminiSpeech(text: text, voiceID: voiceID)
     case .localPiper:
       return try await LocalVoiceSynthesisService.shared.synthesize(text: text)
-    case .systemVoice:
+    case .geminiNativeAudio, .systemVoice:
+      // Both stream or speak directly; neither has a finished-clip synthesis.
       throw CancellationError()
     }
   }
@@ -1561,6 +1921,14 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
     {
       return "quota"
     }
+    if let rendererError = error as? NativeAudioSpeechRenderer.RendererFailure {
+      switch rendererError {
+      case .missingKey: return "auth"
+      case .unavailable, .setupFailed, .sessionClosed: return "provider_5xx"
+      case .providerRefusal: return "provider_refused"
+      case .utteranceTimedOut: return "timeout"
+      }
+    }
     guard let credentialError = error as? CredentialHealthError else { return "provider_5xx" }
     switch credentialError.failureClass {
     case .providerAuthFailed:
@@ -1734,21 +2102,33 @@ final class FloatingBarVoicePlaybackService: NSObject, AVAudioPlayerDelegate, AV
       .appendingPathComponent("\(fingerprint).mp3")
   }
 
-  private nonisolated static func nextChunkBoundary(
-    in text: String, isFinal: Bool, isFirstChunk: Bool
+  /// Production seam (internal for tests): the boundary one reader/TTS chunk
+  /// ends at, or nil when the buffered text is not yet a chunk.
+  nonisolated static func nextChunkBoundary(
+    in text: String, isFinal: Bool, isFirstChunk: Bool, profile: NativeSpeechChunking
   ) -> String.Index? {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
+
+    if profile == .whole {
+      // One turn: nothing is spoken until the answer is complete.
+      return isFinal ? text.endIndex : nil
+    }
+
+    if profile == .twoPart {
+      // Uniform 500-character, sentence-aligned turns. The renderer releases the
+      // next turn as soon as the previous one starts speaking, so no turn ever
+      // reaches the provider in the same moment as its predecessor.
+      return twoPartBoundary(in: text, isFinal: isFinal)
+    }
 
     if isFinal {
       return text.endIndex
     }
 
-    let minLength = isFirstChunk ? firstChunkMinimumLength : followupChunkMinimumLength
-    let preferredLength =
-      isFirstChunk ? firstChunkPreferredLength : followupChunkPreferredLength
-    let emergencyLength =
-      isFirstChunk ? firstChunkEmergencyLength : followupChunkEmergencyLength
+    let minLength = isFirstChunk ? profile.firstMinimum : profile.followupMinimum
+    let preferredLength = isFirstChunk ? profile.firstPreferred : profile.followupPreferred
+    let emergencyLength = isFirstChunk ? profile.firstEmergency : profile.followupEmergency
 
     guard text.count >= minLength else { return nil }
 
@@ -1881,6 +2261,7 @@ enum VoiceSynthesisFallbackPolicy {
 private enum PlaybackMode: Sendable {
   case openAI(voiceID: String, instructions: String)
   case geminiTTS(voiceID: String)
+  case geminiNativeAudio(voiceID: String)
   case localPiper
   case systemVoice(ShortcutSettings.VoiceOption)
 }
@@ -1905,6 +2286,11 @@ struct SpokenVoiceAttribution: Equatable, Sendable {
       return SpokenVoiceAttribution(
         provider: "gemini-tts",
         model: FloatingBarVoicePlaybackService.selectedGeminiTTSModel,
+        voice: voiceID)
+    case .geminiNativeAudio(let voiceID):
+      return SpokenVoiceAttribution(
+        provider: "gemini-native-audio",
+        model: NativeAudioSpeechRenderer.selectedModelID,
         voice: voiceID)
     case .localPiper:
       return SpokenVoiceAttribution(

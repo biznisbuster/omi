@@ -66,6 +66,11 @@ extension SettingsContentView {
             }
           }
           .accessibilityIdentifier("aichat.voice_answer_mode")
+          .onChange(of: pttVoiceMode) { _, _ in
+            // The hub only warms in Voice Live mode; switching back to Live must
+            // start its session now instead of waiting for the next PTT press.
+            NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
+          }
         }
 
         Text((PTTVoiceMode(rawValue: pttVoiceMode) ?? .live).subtitle)
@@ -159,10 +164,20 @@ extension SettingsContentView {
               }
             }
             .accessibilityIdentifier("voice.live_voice")
-            .onChange(of: realtimeGeminiVoice) { _, _ in
+            .onChange(of: realtimeGeminiVoice) { _, newVoice in
               // The session's speech config is baked when the warm session is
               // built, so a changed voice must rebuild it.
               NotificationCenter.default.post(name: .realtimeOmniSettingsDidChange, object: nil)
+              // One voice system for the Gemini voices: when the reader is a
+              // native-audio voice, the Live pick moves it to the same prebuilt
+              // voice instead of leaving the two pickers disagreeing.
+              if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isGeminiNativeAudio,
+                let match = ShortcutSettings.availableVoices.first(where: {
+                  $0.isGeminiNativeAudio && $0.geminiVoice == newVoice
+                })
+              {
+                shortcutSettings.selectedVoiceID = match.id
+              }
             }
           }
         }
@@ -454,9 +469,10 @@ extension SettingsContentView {
             Spacer()
             // The macOS system voice stays a fallback, never a picker entry
             // (the pinned fallback chain owns it), so the provider list is
-            // exactly the three speech services.
+            // exactly the speech services.
             SettingsMenuPicker(selection: speechProviderBinding) {
-              Text("Gemini (your key)").tag("gemini")
+              Text("Gemini native audio (your key)").tag("geminiNativeAudio")
+              Text("Gemini TTS (your key)").tag("gemini")
               Text("OpenAI (needs a key)").tag("openai")
               Text("On-device Piper (Serbian)").tag("piper")
             }
@@ -469,6 +485,13 @@ extension SettingsContentView {
               .foregroundColor(Ink.primary)
             Spacer()
             switch ShortcutSettings.provider(for: shortcutSettings.selectedVoiceID) {
+            case .geminiNativeAudio:
+              SettingsMenuPicker(selection: $speechNativeAudioModel) {
+                ForEach(NativeAudioSpeechRenderer.modelOptions, id: \.id) { option in
+                  Text(option.label).tag(option.id)
+                }
+              }
+              .accessibilityIdentifier("floatingbar.speech_model")
             case .geminiTTS:
               SettingsMenuPicker(selection: $speechGeminiTTSModel) {
                 ForEach(FloatingBarVoicePlaybackService.geminiTTSModelOptions, id: \.self) {
@@ -505,6 +528,31 @@ extension SettingsContentView {
           }
         }
 
+        // The reader's own two dials. Chunk size trades voice steadiness against
+        // sentence joins; the standard style is the pre-existing TTS chunking.
+        if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isGeminiNativeAudio {
+          VStack(alignment: .leading, spacing: OmiSpacing.sm) {
+            HStack {
+              Text("Chunk size")
+                .scaledFont(size: OmiType.caption, weight: .medium)
+                .foregroundColor(Ink.primary)
+              Spacer()
+              SettingsMenuPicker(selection: $speechNativeAudioChunking) {
+                ForEach(NativeSpeechChunking.allCases, id: \.rawValue) { style in
+                  Text(style.displayName).tag(style.rawValue)
+                }
+              }
+              .accessibilityIdentifier("floatingbar.speech_chunking")
+            }
+            Text(
+              (NativeSpeechChunking(rawValue: speechNativeAudioChunking) ?? .small).subtitle
+            )
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(Ink.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+
         if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isLocalPiper {
           localVoiceInstallRow
         }
@@ -514,6 +562,17 @@ extension SettingsContentView {
         {
           Text(
             "This voice speaks through your Gemini API key. Add one in Advanced → Developer API Keys to hear it here; until then replies use the on-device or system voice."
+          )
+          .scaledFont(size: OmiType.caption)
+          .foregroundColor(SettingsInk.notice)
+          .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID).isGeminiNativeAudio,
+          APIKeyService.byokKey(.gemini) == nil
+        {
+          Text(
+            "This voice reads answers through a Gemini Live model with your Gemini API key — the same family and voices Voice Live uses. Add a key in Advanced → Developer API Keys; until then replies use the on-device or system voice."
           )
           .scaledFont(size: OmiType.caption)
           .foregroundColor(SettingsInk.notice)
@@ -583,6 +642,7 @@ extension SettingsContentView {
     Binding(
       get: {
         switch ShortcutSettings.provider(for: shortcutSettings.selectedVoiceID) {
+        case .geminiNativeAudio: return "geminiNativeAudio"
         case .geminiTTS: return "gemini"
         case .openAI: return "openai"
         case .localPiper: return "piper"
@@ -592,6 +652,7 @@ extension SettingsContentView {
       set: { newValue in
         let provider: ShortcutSettings.VoiceOption.Provider
         switch newValue {
+        case "geminiNativeAudio": provider = .geminiNativeAudio
         case "gemini": provider = .geminiTTS
         case "openai": provider = .openAI
         case "piper": provider = .localPiper
@@ -605,6 +666,11 @@ extension SettingsContentView {
   /// speaking?" has one answer in one place.
   private var speechModelLine: String {
     let voice = ShortcutSettings.voiceOption(for: shortcutSettings.selectedVoiceID)
+    if voice.isGeminiNativeAudio, let geminiVoice = voice.geminiVoice {
+      let model = NativeAudioSpeechRenderer.selectedModelID
+      return
+        "Speaking model: \(model) · voice \(geminiVoice) (your Gemini key, streamed)"
+    }
     if voice.isGeminiTTS, let geminiVoice = voice.geminiVoice {
       let model = FloatingBarVoicePlaybackService.selectedGeminiTTSModel
       return "Speaking model: \(model) · voice \(geminiVoice) (your Gemini key)"
